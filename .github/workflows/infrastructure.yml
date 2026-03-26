@@ -111,12 +111,18 @@ jobs:
       # ── NGINX Ingress Controller ──────────────────────────────────
       # Provisions an AWS NLB and routes external traffic into the cluster.
       # --wait means the step blocks until NGINX is fully ready.
+      # Stuck admission jobs from previous partial runs are deleted first
+      # so helm upgrade --install does not time out on pre-upgrade hooks.
       - name: Install NGINX Ingress Controller
         run: |
           helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
           helm repo update
+          kubectl delete job ingress-nginx-admission-create \
+            ingress-nginx-admission-patch \
+            -n ingress-nginx 2>/dev/null || true
           helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
             --namespace ingress-nginx --create-namespace \
+            --cleanup-on-fail \
             --wait --timeout 5m
 
       # ── Cert-Manager ─────────────────────────────────────────────
