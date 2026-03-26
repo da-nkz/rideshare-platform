@@ -81,10 +81,18 @@ variable "rds_db_name" { type = string }
 variable "rds_db_username" {
   type      = string
   sensitive = true
+  validation {
+    condition     = length(var.rds_db_username) >= 1
+    error_message = "rds_db_username is empty — set it in Terraform Cloud workspace variables."
+  }
 }
 variable "rds_db_password" {
   type      = string
   sensitive = true
+  validation {
+    condition     = length(var.rds_db_password) >= 8
+    error_message = "rds_db_password is empty or too short — must be at least 8 characters."
+  }
 }
 variable "rds_multi_az" { type = bool }
 variable "rds_backup_retention_period" { type = number }
