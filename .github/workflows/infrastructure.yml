@@ -117,13 +117,13 @@ jobs:
         run: |
           helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
           helm repo update
-          helm uninstall ingress-nginx --namespace ingress-nginx 2>/dev/null || true
-          kubectl delete namespace ingress-nginx 2>/dev/null || true
-          kubectl wait --for=delete namespace/ingress-nginx --timeout=60s 2>/dev/null || true
-          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+          helm uninstall ingress-nginx --namespace ingress-nginx --no-hooks 2>/dev/null || true
+          kubectl delete all --all -n ingress-nginx 2>/dev/null || true
+          kubectl delete namespace ingress-nginx --force --grace-period=0 2>/dev/null || true
+          kubectl wait --for=delete namespace/ingress-nginx --timeout=90s 2>/dev/null || true
+          helm install ingress-nginx ingress-nginx/ingress-nginx \
             --namespace ingress-nginx --create-namespace \
             --set controller.admissionWebhooks.enabled=false \
-            --no-hooks \
             --wait --timeout 5m
 
       # ── Cert-Manager ─────────────────────────────────────────────
