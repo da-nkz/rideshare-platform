@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: driver-service
-          image: 221693237976.dkr.ecr.us-east-1.amazonaws.com/daniel-driver-service:v1
+          image: 221693237976.dkr.ecr.eu-west-1.amazonaws.com/daniel-driver-service:v1
           ports:
             - containerPort: 3003 
           

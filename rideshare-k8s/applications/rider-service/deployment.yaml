@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: rider-service
-          image: 221693237976.dkr.ecr.us-east-1.amazonaws.com/daniel-rider-service:v1
+          image: 221693237976.dkr.ecr.eu-west-1.amazonaws.com/daniel-rider-service:v1
           ports:
             - containerPort: 3001 
           
