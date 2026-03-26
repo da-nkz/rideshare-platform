@@ -56,9 +56,25 @@ jobs:
 
       # Plan first so you can see what will change in the logs
       - name: Terraform Plan
+        env:
+          TF_VAR_azure_email_connection_string: ${{ secrets.TF_VAR_AZURE_EMAIL_CONNECTION_STRING }}
+          TF_VAR_sender_email: ${{ secrets.TF_VAR_SENDER_EMAIL }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_mapbox_access_token: ${{ secrets.TF_VAR_MAPBOX_ACCESS_TOKEN }}
+          TF_VAR_rds_db_username: ${{ secrets.RDS_DB_USERNAME }}
+          TF_VAR_rds_db_password: ${{ secrets.RDS_DB_PASSWORD }}
         run: terraform plan -var-file=dev.tfvars -out=tfplan
 
       - name: Terraform Apply
+        env:
+          TF_VAR_azure_email_connection_string: ${{ secrets.TF_VAR_AZURE_EMAIL_CONNECTION_STRING }}
+          TF_VAR_sender_email: ${{ secrets.TF_VAR_SENDER_EMAIL }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_mapbox_access_token: ${{ secrets.TF_VAR_MAPBOX_ACCESS_TOKEN }}
+          TF_VAR_rds_db_username: ${{ secrets.RDS_DB_USERNAME }}
+          TF_VAR_rds_db_password: ${{ secrets.RDS_DB_PASSWORD }}
         run: terraform apply -auto-approve tfplan
 
   # ── Job 2: Platform Setup ─────────────────────────────────────────
