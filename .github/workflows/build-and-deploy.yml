@@ -1,0 +1,406 @@
+name: Build and Deploy Services
+
+# ── When does this run? ───────────────────────────────────────────
+# 1. After Platform Setup completes — forms the final link in the
+#    push-to-deploy chain: Terraform → Platform Setup → Apps
+# 2. Automatically when you push changes to any microservice directory
+#    or its corresponding Kubernetes manifests. Only the changed
+#    service(s) are built and deployed — not all six every time.
+# 3. Manually from the GitHub Actions tab using "Run workflow".
+on:
+  workflow_run:
+    workflows: ["Infrastructure"]
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'rideshare-driver-service/**'
+      - 'rideshare-rider-service/**'
+      - 'rideshare-trip-service/**'
+      - 'rideshare-email-service/**'
+      - 'rideshare-matching-service/**'
+      - 'rideshare-frontend/**'
+      - 'rideshare-k8s/applications/**'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REGISTRY: 221693237976.dkr.ecr.eu-west-1.amazonaws.com
+  CLUSTER_NAME: teleios-daniel-dev-eks
+
+jobs:
+  # ── Job 1: Detect Changes ─────────────────────────────────────────
+  # Compares what files changed in this push and outputs a true/false
+  # flag per service. The downstream build jobs read these flags and
+  # skip themselves if their service didn't change.
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    # When triggered by workflow_run, only proceed if platform-setup succeeded
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event.workflow_run.conclusion == 'success'
+    outputs:
+      driver:   ${{ steps.filter.outputs.driver }}
+      rider:    ${{ steps.filter.outputs.rider }}
+      trip:     ${{ steps.filter.outputs.trip }}
+      email:    ${{ steps.filter.outputs.email }}
+      matching: ${{ steps.filter.outputs.matching }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check which services changed
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            driver:
+              - 'rideshare-driver-service/**'
+              - 'rideshare-k8s/applications/driver-service/**'
+            rider:
+              - 'rideshare-rider-service/**'
+              - 'rideshare-k8s/applications/rider-service/**'
+            trip:
+              - 'rideshare-trip-service/**'
+              - 'rideshare-k8s/applications/trip-service/**'
+            email:
+              - 'rideshare-email-service/**'
+              - 'rideshare-k8s/applications/email-service/**'
+            matching:
+              - 'rideshare-matching-service/**'
+              - 'rideshare-k8s/applications/matching-service/**'
+            frontend:
+              - 'rideshare-frontend/**'
+              - 'rideshare-k8s/applications/frontend/**'
+
+  # ── Job 2: Driver Service ─────────────────────────────────────────
+  # Skipped automatically unless rideshare-driver-service/** changed.
+  # On workflow_dispatch (manual run), all services build regardless.
+  build-driver-service:
+    name: Driver Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.driver == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Generates a temporary ECR login token valid for 12 hours
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 2>/dev/null || true makes this idempotent — no error if repo exists
+      - name: Create ECR Repository
+        run: |
+          aws ecr create-repository \
+            --repository-name daniel-driver-service \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+      # Image is tagged with the full git commit SHA for traceability.
+      # You can always roll back to any previous commit's image.
+      - name: Build and Push Image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/daniel-driver-service:$IMAGE_TAG \
+            ./rideshare-driver-service
+          docker push ${{ env.ECR_REGISTRY }}/daniel-driver-service:$IMAGE_TAG
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      # sed replaces the hardcoded :v1 tag in deployment.yaml with the
+      # actual git SHA tag before applying — keeps the manifest in sync
+      # with what's actually deployed without editing the file on disk.
+      - name: Deploy to EKS
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          kubectl apply -f rideshare-k8s/applications/driver-service/configmap.yaml
+          sed "s|daniel-driver-service:v[0-9]*|daniel-driver-service:$IMAGE_TAG|g" \
+            rideshare-k8s/applications/driver-service/deployment.yaml \
+            | kubectl apply -f -
+          kubectl apply -f rideshare-k8s/applications/driver-service/hpa.yaml
+          kubectl rollout status deployment/driver-service \
+            -n rideshare-data --timeout=5m
+
+  # ── Job 3: Rider Service ──────────────────────────────────────────
+  build-rider-service:
+    name: Rider Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rider == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR Repository
+        run: |
+          aws ecr create-repository \
+            --repository-name daniel-rider-service \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+      - name: Build and Push Image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/daniel-rider-service:$IMAGE_TAG \
+            ./rideshare-rider-service
+          docker push ${{ env.ECR_REGISTRY }}/daniel-rider-service:$IMAGE_TAG
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      - name: Deploy to EKS
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          kubectl apply -f rideshare-k8s/applications/rider-service/configmap.yaml
+          sed "s|daniel-rider-service:v[0-9]*|daniel-rider-service:$IMAGE_TAG|g" \
+            rideshare-k8s/applications/rider-service/deployment.yaml \
+            | kubectl apply -f -
+          kubectl apply -f rideshare-k8s/applications/rider-service/hpa.yaml
+          kubectl rollout status deployment/rider-service \
+            -n rideshare-data --timeout=5m
+
+  # ── Job 4: Trip Service ───────────────────────────────────────────
+  build-trip-service:
+    name: Trip Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.trip == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR Repository
+        run: |
+          aws ecr create-repository \
+            --repository-name daniel-trip-service \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+      - name: Build and Push Image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/daniel-trip-service:$IMAGE_TAG \
+            ./rideshare-trip-service
+          docker push ${{ env.ECR_REGISTRY }}/daniel-trip-service:$IMAGE_TAG
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      - name: Deploy to EKS
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          kubectl apply -f rideshare-k8s/applications/trip-service/configmap.yaml
+          sed "s|daniel-trip-service:v[0-9]*|daniel-trip-service:$IMAGE_TAG|g" \
+            rideshare-k8s/applications/trip-service/deployment.yaml \
+            | kubectl apply -f -
+          kubectl apply -f rideshare-k8s/applications/trip-service/hpa.yaml
+          kubectl rollout status deployment/trip-service \
+            -n rideshare-data --timeout=5m
+
+  # ── Job 5: Email Service ──────────────────────────────────────────
+  build-email-service:
+    name: Email Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.email == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR Repository
+        run: |
+          aws ecr create-repository \
+            --repository-name daniel-email-service \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+      - name: Build and Push Image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/daniel-email-service:$IMAGE_TAG \
+            ./rideshare-email-service
+          docker push ${{ env.ECR_REGISTRY }}/daniel-email-service:$IMAGE_TAG
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      - name: Deploy to EKS
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          kubectl apply -f rideshare-k8s/applications/email-service/configmap.yaml
+          sed "s|daniel-email-service:v[0-9]*|daniel-email-service:$IMAGE_TAG|g" \
+            rideshare-k8s/applications/email-service/deployment.yaml \
+            | kubectl apply -f -
+          kubectl apply -f rideshare-k8s/applications/email-service/hpa.yaml
+          kubectl rollout status deployment/email-service \
+            -n rideshare-data --timeout=5m
+
+  # ── Job 6: Matching Service (Go) ──────────────────────────────────
+  build-matching-service:
+    name: Matching Service
+    needs: detect-changes
+    if: needs.detect-changes.outputs.matching == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR Repository
+        run: |
+          aws ecr create-repository \
+            --repository-name daniel-rideshare-matching-service \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+      - name: Build and Push Image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/daniel-rideshare-matching-service:$IMAGE_TAG \
+            ./rideshare-matching-service
+          docker push ${{ env.ECR_REGISTRY }}/daniel-rideshare-matching-service:$IMAGE_TAG
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      - name: Deploy to EKS
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          kubectl apply -f rideshare-k8s/applications/matching-service/configmap.yaml
+          sed "s|daniel-rideshare-matching-service:v[0-9]*|daniel-rideshare-matching-service:$IMAGE_TAG|g" \
+            rideshare-k8s/applications/matching-service/deployment.yaml \
+            | kubectl apply -f -
+          kubectl apply -f rideshare-k8s/applications/matching-service/hpa.yaml
+          kubectl rollout status deployment/matching-service \
+            -n rideshare-data --timeout=5m
+
+  # ── Job 7: Frontend (Next.js) ─────────────────────────────────────
+  # Next.js bakes NEXT_PUBLIC_* variables into the JavaScript bundle
+  # at BUILD TIME, not runtime. This means they must be passed as
+  # Docker build args. They are stored as GitHub Secrets and passed
+  # in via --build-arg below.
+  build-frontend:
+    name: Frontend
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR Repository
+        run: |
+          aws ecr create-repository \
+            --repository-name daniel-rideshare-frontend \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+      # The --build-arg values map to the ARG declarations in the Dockerfile.
+      # URL values match the ingress routes defined in platform/ingress/ingress.yaml.
+      # NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN comes from a GitHub Secret (never hardcoded).
+      - name: Build and Push Image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build \
+            --build-arg NEXT_PUBLIC_DRIVER_SERVICE_URL=https://daniel.teleioslabs.net/api/v1/drivers \
+            --build-arg NEXT_PUBLIC_RIDER_SERVICE_URL=https://daniel.teleioslabs.net/api/v1/riders \
+            --build-arg NEXT_PUBLIC_TRIP_SERVICE_URL=https://daniel.teleioslabs.net/api/v1/trips \
+            --build-arg NEXT_PUBLIC_TRIP_WS_URL=wss://daniel.teleioslabs.net/ws \
+            --build-arg NEXT_PUBLIC_WS_URL=wss://daniel.teleioslabs.net/ws \
+            --build-arg NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${{ secrets.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN }} \
+            -t ${{ env.ECR_REGISTRY }}/daniel-rideshare-frontend:$IMAGE_TAG \
+            ./rideshare-frontend
+          docker push ${{ env.ECR_REGISTRY }}/daniel-rideshare-frontend:$IMAGE_TAG
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      - name: Deploy to EKS
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          kubectl apply -f rideshare-k8s/applications/frontend/configmap.yaml
+          sed "s|daniel-rideshare-frontend:v[0-9]*|daniel-rideshare-frontend:$IMAGE_TAG|g" \
+            rideshare-k8s/applications/frontend/deployment.yaml \
+            | kubectl apply -f -
+          kubectl apply -f rideshare-k8s/applications/frontend/hpa.yaml
+          kubectl rollout status deployment/frontend-service \
+            -n rideshare-data --timeout=5m

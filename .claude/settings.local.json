@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(for svc:*)",
+      "Bash(do)",
+      "Bash(echo \"=== $svc ===\")",
+      "Read(//c/Users/danie/OneDrive/Documents/Teleios/Terraform Project/Rideshare-IAC/**)",
+      "Bash(done)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -r \"health\\\\|/ping\\\\|/status\\\\|/ready\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-driver-service' --include=*.js --include=*.ts -l)",
+      "Bash(grep -r \"health\\\\|/ping\\\\|/status\\\\|/ready\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-email-service' --include=*.py)",
+      "Bash(grep -r \"health\\\\|/ping\\\\|/status\\\\|/ready\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-matching-service' --include=*.go)",
+      "Bash(grep -rn \"health\\\\|/ping\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-rider-service' --include=*.ts --include=*.js)",
+      "Bash(head -5 grep -rn \"health\\\\|/ping\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-trip-service' --include=*.ts --include=*.js --include=*.py)",
+      "Bash(grep -rn \"health\\\\|/ping\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-frontend' --include=*.ts --include=*.tsx --include=*.js)"
+    ]
+  }
+}

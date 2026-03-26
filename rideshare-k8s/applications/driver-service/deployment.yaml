@@ -1,0 +1,81 @@
+# 1. The Driver Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driver-service
+  namespace: rideshare-data
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: driver-service
+  template:
+    metadata:
+      labels:
+        app: driver-service
+    spec:
+      containers:
+        - name: driver-service
+          image: 221693237976.dkr.ecr.us-east-1.amazonaws.com/daniel-driver-service:v1
+          ports:
+            - containerPort: 3003 
+          
+          # 1. Bulk-load the non-sensitive variables (Ports, URLs, etc.)
+          envFrom:
+            - configMapRef:
+                name: driver-service-config
+          
+          # 2. Surgically inject the sensitive AWS Secrets from your merged local container
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: rideshare-db-credentials
+                  key: DATABASE_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: rideshare-db-credentials
+                  key: JWT_SECRET
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rideshare-db-credentials
+                  key: REDIS_PASSWORD
+                  
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3003
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3003
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+---
+# 2. The Internal Network Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: driver-service
+  namespace: rideshare-data
+spec:
+  selector:
+    app: driver-service
+  ports:
+    - protocol: TCP
+      port: 3003
+      targetPort: 3003

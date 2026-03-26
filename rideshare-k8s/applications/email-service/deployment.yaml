@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: email-service
+  namespace: rideshare-data
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: email-service
+  template:
+    metadata:
+      labels:
+        app: email-service
+    spec:
+      containers:
+        - name: email-service
+          image: 221693237976.dkr.ecr.us-east-1.amazonaws.com/daniel-email-service:v2
+          ports:
+            - containerPort: 3002
+          envFrom:
+            - configMapRef:
+                name: email-service-config
+          env:
+            # Injecting the Azure secrets 
+            - name: AZURE_EMAIL_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: email-app-credentials
+                  key: AZURE_EMAIL_CONNECTION_STRING
+            - name: SENDER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: email-app-credentials
+                  key: SENDER_EMAIL
+          readinessProbe:
+            httpGet:
+              path: /api/v1/email/health
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/email/health
+              port: 3002
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+---
+# 2. The Internal Network Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: email-service
+  namespace: rideshare-data
+spec:
+  selector:
+    app: email-service
+  ports:
+    - protocol: TCP
+      port: 3002
+      targetPort: 3002

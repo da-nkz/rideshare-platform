@@ -1,0 +1,315 @@
+name: Infrastructure
+
+# ── When does this run? ───────────────────────────────────────────
+# 1. Automatically when you push changes to the Terraform code or
+#    the platform-level Kubernetes manifests.
+# 2. Manually from the GitHub Actions tab (workflow_dispatch).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Rideshare-IAC/**'
+      - 'rideshare-k8s/platform/**'
+      - 'rideshare-k8s/aws/**'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-west-1
+  CLUSTER_NAME: teleios-daniel-dev-eks
+
+jobs:
+  # ── Job 1: Terraform ──────────────────────────────────────────────
+  # Provisions the AWS infrastructure: VPC, EKS, RDS, Redis, S3, EC2.
+  # Also creates all AWS Secrets Manager entries (secrets.tf).
+  terraform:
+    name: Provision Infrastructure
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Rideshare-IAC
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # cli_config_credentials_token authenticates Terraform CLI to
+      # Terraform Cloud. State is stored there; plan/apply run here
+      # on the GitHub runner (Local execution mode).
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9"
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      # With the cloud {} block in main.tf, init connects directly to
+      # the teleios-daniel-dev workspace in Terraform Cloud.
+      # No -backend-config flags or workspace selection needed.
+      - name: Terraform Init
+        run: terraform init
+
+      # Plan first so you can see what will change in the logs
+      - name: Terraform Plan
+        run: terraform plan -var-file=dev.tfvars -out=tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+  # ── Job 2: Platform Setup ─────────────────────────────────────────
+  # Runs after Terraform. Installs the Kubernetes tooling your apps
+  # depend on: NGINX Ingress, Cert-Manager, External Secrets Operator,
+  # and ExternalDNS (automatically creates the daniel.teleioslabs.net
+  # DNS record in Route 53 when the ingress is applied).
+  platform-setup:
+    name: Install Platform Components
+    runs-on: ubuntu-latest
+    needs: terraform   # Only runs if terraform job succeeds
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Writes ~/.kube/config so kubectl and helm can talk to your cluster
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      # ── NGINX Ingress Controller ──────────────────────────────────
+      # Provisions an AWS NLB and routes external traffic into the cluster.
+      # --wait means the step blocks until NGINX is fully ready.
+      - name: Install NGINX Ingress Controller
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx --create-namespace \
+            --wait --timeout 5m
+
+      # ── Cert-Manager ─────────────────────────────────────────────
+      # Automatically provisions and renews TLS certificates from
+      # Let's Encrypt for daniel.teleioslabs.net.
+      - name: Install Cert-Manager
+        run: |
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            --namespace cert-manager --create-namespace \
+            --set crds.enabled=true \
+            --wait --timeout 5m
+
+      # ── External Secrets Operator ─────────────────────────────────
+      # Syncs secrets from AWS Secrets Manager into Kubernetes Secrets
+      # so your pods can read them as environment variables.
+      - name: Install External Secrets Operator
+        run: |
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm repo update
+          helm upgrade --install external-secrets external-secrets/external-secrets \
+            --namespace external-secrets --create-namespace \
+            --set serviceAccount.name=external-secrets-sa \
+            --wait --timeout 5m
+
+      # ── IRSA for External Secrets ─────────────────────────────────
+      # IRSA = IAM Roles for Service Accounts.
+      # This lets the External Secrets pod authenticate to AWS using
+      # its Kubernetes identity (no static keys stored in the cluster).
+      #
+      # What it does:
+      #   1. Creates an IAM role with a trust policy scoped to the ESO
+      #      service account via the cluster's OIDC provider.
+      #   2. Attaches SecretsManagerReadWrite to that role.
+      #   3. Annotates the external-secrets-sa service account with the
+      #      IAM role ARN so AWS knows which role to grant.
+      - name: Set Up IRSA for External Secrets
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          OIDC_URL=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query "cluster.identity.oidc.issuer" \
+            --output text)
+          OIDC_HOST="${OIDC_URL#https://}"
+
+          ROLE_NAME="teleios-daniel-dev-external-secrets-role"
+
+          TRUST_POLICY=$(cat <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/${OIDC_HOST}"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "${OIDC_HOST}:sub": "system:serviceaccount:external-secrets:external-secrets-sa",
+                  "${OIDC_HOST}:aud": "sts.amazonaws.com"
+                }
+              }
+            }]
+          }
+          EOF
+          )
+
+          # Create role (idempotent — update trust policy if role exists)
+          aws iam create-role \
+            --role-name "$ROLE_NAME" \
+            --assume-role-policy-document "$TRUST_POLICY" 2>/dev/null \
+          || aws iam update-assume-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-document "$TRUST_POLICY"
+
+          aws iam attach-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite 2>/dev/null || true
+
+          # Annotate the service account with the IAM role ARN
+          kubectl annotate serviceaccount external-secrets-sa \
+            --namespace external-secrets \
+            eks.amazonaws.com/role-arn=arn:aws:iam::${AWS_ACCOUNT_ID}:role/$ROLE_NAME \
+            --overwrite
+
+          # Restart ESO so its pods pick up the new IRSA token
+          kubectl rollout restart deployment/external-secrets -n external-secrets
+          kubectl rollout status deployment/external-secrets \
+            -n external-secrets --timeout=2m
+
+      # ── ExternalDNS ───────────────────────────────────────────────
+      # Watches Ingress resources and automatically upserts a DNS record
+      # in Route 53 for daniel.teleioslabs.net pointing to the NLB.
+      # Since teleioslabs.net is already a hosted zone in your org's
+      # AWS account, no manual DNS setup is needed after this runs.
+      - name: Set Up IRSA for ExternalDNS
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          OIDC_URL=$(aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --query "cluster.identity.oidc.issuer" \
+            --output text)
+          OIDC_HOST="${OIDC_URL#https://}"
+
+          ROLE_NAME="teleios-daniel-dev-external-dns-role"
+
+          # Route 53 permissions: list zones + upsert records
+          aws iam create-policy \
+            --policy-name teleios-daniel-dev-external-dns-policy \
+            --policy-document '{
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": ["route53:ChangeResourceRecordSets"],
+                  "Resource": "arn:aws:route53:::hostedzone/*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "route53:ListHostedZones",
+                    "route53:ListResourceRecordSets"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }' 2>/dev/null || true
+
+          TRUST_POLICY=$(cat <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/${OIDC_HOST}"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "${OIDC_HOST}:sub": "system:serviceaccount:external-dns:external-dns",
+                  "${OIDC_HOST}:aud": "sts.amazonaws.com"
+                }
+              }
+            }]
+          }
+          EOF
+          )
+
+          aws iam create-role \
+            --role-name "$ROLE_NAME" \
+            --assume-role-policy-document "$TRUST_POLICY" 2>/dev/null \
+          || aws iam update-assume-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-document "$TRUST_POLICY"
+
+          aws iam attach-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-arn "arn:aws:iam::${AWS_ACCOUNT_ID}:policy/teleios-daniel-dev-external-dns-policy" 2>/dev/null || true
+
+      - name: Install ExternalDNS
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/teleios-daniel-dev-external-dns-role"
+
+          helm repo add external-dns https://kubernetes-sigs.github.io/external-dns
+          helm repo update
+          kubectl create namespace external-dns 2>/dev/null || true
+          helm upgrade --install external-dns external-dns/external-dns \
+            --namespace external-dns \
+            --set provider=aws \
+            --set "domainFilters[0]=teleioslabs.net" \
+            --set policy=upsert-only \
+            --set txtOwnerId=teleios-daniel-cluster \
+            --set "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=${ROLE_ARN}" \
+            --wait --timeout 5m
+
+      # ── App Namespace ─────────────────────────────────────────────
+      # All your microservices live in the rideshare-data namespace.
+      # --dry-run=client -o yaml | kubectl apply ensures idempotency
+      # (no error if the namespace already exists).
+      - name: Create App Namespace
+        run: |
+          kubectl create namespace rideshare-data \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Storage Classes
+        run: kubectl apply -f rideshare-k8s/aws/storage-classes.yaml
+
+      # Apply the ClusterSecretStore first (defines WHERE secrets come from),
+      # then the ExternalSecrets (defines WHICH secrets to fetch).
+      - name: Apply Secret Store and External Secrets
+        run: |
+          kubectl apply -f rideshare-k8s/platform/secrets/secret-store.yaml
+          kubectl apply -f rideshare-k8s/platform/secrets/external-secrets.yaml
+
+      # Wait for cert-manager webhook before applying the ClusterIssuer —
+      # otherwise the CRD validation will fail.
+      - name: Apply Cluster Issuer
+        run: |
+          kubectl rollout status deployment/cert-manager-webhook \
+            -n cert-manager --timeout=2m
+          kubectl apply -f rideshare-k8s/platform/ingress/cluster-issuer.yaml
+
+      # Apply the Ingress last — cert-manager needs to be ready to
+      # provision the TLS certificate for daniel.teleioslabs.net.
+      # ExternalDNS will see this Ingress and automatically create
+      # the DNS record in the teleioslabs.net Route 53 hosted zone.
+      - name: Apply Ingress Rules
+        run: kubectl apply -f rideshare-k8s/platform/ingress/ingress.yaml

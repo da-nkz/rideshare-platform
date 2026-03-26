@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: email-service-config
+  namespace: rideshare-data
+data:
+  PORT: "3002"
+  FLASK_ENV: "production"

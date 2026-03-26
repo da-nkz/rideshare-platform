@@ -1,0 +1,94 @@
+# 1. The Rider Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rider-service
+  namespace: rideshare-data
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rider-service
+  template:
+    metadata:
+      labels:
+        app: rider-service
+    spec:
+      containers:
+        - name: rider-service
+          image: 221693237976.dkr.ecr.us-east-1.amazonaws.com/daniel-rider-service:v1
+          ports:
+            - containerPort: 3001 
+          
+          # 1. Bulk-load the public routing variables from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: rider-service-config
+          
+          # 2. Surgically inject the sensitive AWS Secrets
+          env:
+            # -- From the DB Credentials Vault --
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: rideshare-db-credentials
+                  key: DATABASE_URL
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rideshare-db-credentials
+                  key: REDIS_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: rideshare-db-credentials
+                  key: JWT_SECRET
+                  
+            # -- From the Google OAuth Vault --
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: google-oauth-credentials
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-oauth-credentials
+                  key: GOOGLE_CLIENT_SECRET
+                  
+          readinessProbe:
+            httpGet:
+              path: /api/v1/riders/health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/riders/health
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+---
+# 2. The Internal Network Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: rider-service
+  namespace: rideshare-data
+spec:
+  selector:
+    app: rider-service
+  ports:
+    - protocol: TCP
+      port: 3001
+      targetPort: 3001

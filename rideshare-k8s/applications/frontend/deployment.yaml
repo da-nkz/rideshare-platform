@@ -1,0 +1,55 @@
+# 1. The Frontend Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-service
+  namespace: rideshare-data
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend-service
+  template:
+    metadata:
+      labels:
+        app: frontend-service
+    spec:
+      containers:
+        - name: frontend-service
+          image: 221693237976.dkr.ecr.us-east-1.amazonaws.com/daniel-rideshare-frontend:v2
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+---
+# 2. The Internal Network Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: rideshare-data
+spec:
+  selector:
+    app: frontend-service
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000

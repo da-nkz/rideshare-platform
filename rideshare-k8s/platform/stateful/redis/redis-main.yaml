@@ -1,0 +1,96 @@
+# 1. Headless Service (For internal node-to-node cluster communication)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-headless
+  namespace: rideshare-data
+spec:
+  clusterIP: None
+  ports:
+    - port: 6379
+      name: redis
+    - port: 16379
+      name: redis-bus
+  selector:
+    app: redis-cluster
+
+---
+# 2. Standard Service (For your microservices to connect to)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster
+  namespace: rideshare-data
+spec:
+  ports:
+    - port: 6379
+      name: redis
+  selector:
+    app: redis-cluster
+
+---
+# 3. Redis Cluster StatefulSet (6 Nodes)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-cluster
+  namespace: rideshare-data
+spec:
+  serviceName: redis-cluster-headless
+  replicas: 6
+  selector:
+    matchLabels:
+      app: redis-cluster
+  template:
+    metadata:
+      labels:
+        app: redis-cluster
+    spec:
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - name: redis
+          image: docker.io/bitnamilegacy/redis-cluster:7.2
+          ports:
+            - containerPort: 6379
+              name: redis
+            - containerPort: 16379
+              name: redis-bus
+          env:
+            # SECURE SECRET INJECTION
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret-volume
+                  key: REDIS_PASSWORD
+            - name: REDIS_NODES
+              value: "redis-cluster-0.redis-cluster-headless.rideshare-data.svc.cluster.local redis-cluster-1.redis-cluster-headless.rideshare-data.svc.cluster.local redis-cluster-2.redis-cluster-headless.rideshare-data.svc.cluster.local redis-cluster-3.redis-cluster-headless.rideshare-data.svc.cluster.local redis-cluster-4.redis-cluster-headless.rideshare-data.svc.cluster.local redis-cluster-5.redis-cluster-headless.rideshare-data.svc.cluster.local"
+            - name: REDIS_CLUSTER_REPLICAS
+              value: "1"
+            - name: REDIS_CLUSTER_CREATOR
+              value: "yes"
+            - name: REDIS_CLUSTER_DYNAMIC_IPS
+              value: "no"
+            - name: REDIS_CLUSTER_ANNOUNCE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: redis-data
+              mountPath: /bitnami/redis/data
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: 5Gi

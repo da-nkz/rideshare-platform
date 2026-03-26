@@ -1,0 +1,186 @@
+# 1. Governing Headless Service (For StatefulSet network identity)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: rideshare-data
+spec:
+  clusterIP: None
+  ports:
+    - port: 5432
+      name: postgresql
+  selector:
+    app: postgres
+
+---
+# 2. Primary Service (For Database Writes)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary
+  namespace: rideshare-data
+spec:
+  ports:
+    - port: 5432
+      name: postgresql
+  selector:
+    app: postgres
+    role: primary
+
+---
+# 3. Read Replica Service (For Database Reads)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-read
+  namespace: rideshare-data
+spec:
+  ports:
+    - port: 5432
+      name: postgresql
+  selector:
+    app: postgres
+    role: replica
+
+---
+# 4. Primary Node StatefulSet (1 Replica)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-primary
+  namespace: rideshare-data
+spec:
+  replicas: 1
+  serviceName: postgres-headless
+  selector:
+    matchLabels:
+      app: postgres
+      role: primary
+  template:
+    metadata:
+      labels:
+        app: postgres
+        role: primary
+    spec:
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - name: postgresql
+          image: docker.io/bitnamilegacy/postgresql:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRESQL_REPLICATION_MODE
+              value: master
+            - name: POSTGRESQL_DATABASE
+              value: rideshare_db
+            # SECURE SECRET INJECTION 
+            - name: POSTGRESQL_REPLICATION_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret-volume
+                  key: POSTGRES_REPL_USER
+            - name: POSTGRESQL_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret-volume
+                  key: POSTGRES_REPL_PASS
+            - name: POSTGRESQL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret-volume
+                  key: POSTGRES_ADMIN_USER
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret-volume
+                  key: POSTGRES_ADMIN_PASS
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /bitnami/postgresql
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: 5Gi
+
+---
+# 5. Replica Nodes StatefulSet (2 Replicas)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-replica
+  namespace: rideshare-data
+spec:
+  replicas: 2
+  serviceName: postgres-headless
+  selector:
+    matchLabels:
+      app: postgres
+      role: replica
+  template:
+    metadata:
+      labels:
+        app: postgres
+        role: replica
+    spec:
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - name: postgresql
+          image: docker.io/bitnamilegacy/postgresql:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRESQL_REPLICATION_MODE
+              value: slave
+            - name: POSTGRESQL_MASTER_HOST
+              value: postgres-primary
+            - name: POSTGRESQL_MASTER_PORT_NUMBER
+              value: "5432"
+            # SECURE SECRET INJECTION 
+            - name: POSTGRESQL_REPLICATION_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret-volume
+                  key: POSTGRES_REPL_USER
+            - name: POSTGRESQL_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret-volume
+                  key: POSTGRES_REPL_PASS
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret-volume
+                  key: POSTGRES_ADMIN_PASS
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /bitnami/postgresql
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: 5Gi

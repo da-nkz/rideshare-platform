@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: driver-service-config
+  namespace: rideshare-data
+data:
+  REDIS_HOST: "redis-cluster"
+  REDIS_PORT: "6379"
+  PORT: "3003"
+  NODE_ENV: "production"
+  FRONTEND_URL: "http://frontend-service"
+  JWT_EXPIRES_IN: "2d"
+  EMAIL_SERVICE_URL: "http://email-service"
+  RIDER_SERVICE_URL: "http://rider-service"
+  TRIP_SERVICE_URL: "http://trip-service"
