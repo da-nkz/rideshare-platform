@@ -123,6 +123,7 @@ jobs:
           helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
             --namespace ingress-nginx --create-namespace \
             --set controller.admissionWebhooks.enabled=false \
+            --no-hooks \
             --wait --timeout 5m
 
       # ── Cert-Manager ─────────────────────────────────────────────
