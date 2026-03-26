@@ -139,5 +139,10 @@ jobs:
       # ── Ingress ───────────────────────────────────────────────────
       # ExternalDNS (installed by Terraform) sees this Ingress and
       # automatically creates the daniel.teleioslabs.net DNS record.
+      # The stale admission webhook from previous installs is deleted
+      # first — without it the ingress apply would fail trying to call
+      # a webhook service that no longer exists.
       - name: Apply Ingress Rules
-        run: kubectl apply -f rideshare-k8s/platform/ingress/ingress.yaml
+        run: |
+          kubectl delete validatingwebhookconfiguration ingress-nginx-admission 2>/dev/null || true
+          kubectl apply -f rideshare-k8s/platform/ingress/ingress.yaml
