@@ -62,8 +62,8 @@ jobs:
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_VAR_mapbox_access_token: ${{ secrets.TF_VAR_MAPBOX_ACCESS_TOKEN }}
-          TF_VAR_rds_db_username: ${{ secrets.RDS_DB_USERNAME }}
-          TF_VAR_rds_db_password: ${{ secrets.RDS_DB_PASSWORD }}
+          TF_VAR_rds_db_username: ${{ secrets.TF_VAR_RDS_DB_USERNAME }}
+          TF_VAR_rds_db_password: ${{ secrets.TF_VAR_RDS_DB_PASSWORD }}
         run: terraform plan -var-file=dev.tfvars -out=tfplan
 
       - name: Terraform Apply
@@ -73,8 +73,8 @@ jobs:
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_VAR_mapbox_access_token: ${{ secrets.TF_VAR_MAPBOX_ACCESS_TOKEN }}
-          TF_VAR_rds_db_username: ${{ secrets.RDS_DB_USERNAME }}
-          TF_VAR_rds_db_password: ${{ secrets.RDS_DB_PASSWORD }}
+          TF_VAR_rds_db_username: ${{ secrets.TF_VAR_RDS_DB_USERNAME }}
+          TF_VAR_rds_db_password: ${{ secrets.TF_VAR_RDS_DB_PASSWORD }}
         run: terraform apply -auto-approve tfplan
 
   # ── Job 2: Platform Setup ─────────────────────────────────────────
