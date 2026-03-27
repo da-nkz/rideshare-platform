@@ -7,4 +7,4 @@ data:
   PORT: "3005"
   REDIS_TLS: "false"
   DEBUG: "False"
-  ALLOWED_ORIGINS: "https://daniel.teleioslabs.net"
+  ALLOWED_ORIGINS: "https://daniel-resume.xyz"

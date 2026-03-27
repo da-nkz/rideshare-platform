@@ -9,7 +9,7 @@ data:
   JWT_EXPIRES_IN: "7d"
   REDIS_HOST: "redis-cluster"
   REDIS_PORT: "6379"
-  FRONTEND_URL: "https://daniel.teleioslabs.net"
+  FRONTEND_URL: "https://daniel-resume.xyz"
   EMAIL_SERVICE_URL: "http://email-service"
   RIDER_SERVICE_URL: "http://rider-service"
   TRIP_SERVICE_URL: "http://trip-service"

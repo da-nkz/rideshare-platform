@@ -77,13 +77,79 @@ jobs:
               - 'rideshare-frontend/**'
               - 'rideshare-k8s/applications/frontend/**'
 
-  # ── Job 2: Driver Service ─────────────────────────────────────────
+  # ── Job 2: Frontend (Next.js) ─────────────────────────────────────
+  # Built first — its URLs are baked into the JS bundle at build time
+  # so it must complete before backend services are deployed.
+  build-frontend:
+    name: Frontend
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR Repository
+        run: |
+          aws ecr create-repository \
+            --repository-name daniel-rideshare-frontend \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+      - name: Build and Push Image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build \
+            --build-arg NEXT_PUBLIC_DRIVER_SERVICE_URL=https://daniel-resume.xyz/api/v1/drivers \
+            --build-arg NEXT_PUBLIC_RIDER_SERVICE_URL=https://daniel-resume.xyz/api/v1/riders \
+            --build-arg NEXT_PUBLIC_TRIP_SERVICE_URL=https://daniel-resume.xyz/api/v1/trips \
+            --build-arg NEXT_PUBLIC_TRIP_WS_URL=wss://daniel-resume.xyz/ws \
+            --build-arg NEXT_PUBLIC_WS_URL=wss://daniel-resume.xyz/ws \
+            --build-arg NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${{ secrets.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN }} \
+            -t ${{ env.ECR_REGISTRY }}/daniel-rideshare-frontend:$IMAGE_TAG \
+            ./rideshare-frontend
+          docker push ${{ env.ECR_REGISTRY }}/daniel-rideshare-frontend:$IMAGE_TAG
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      - name: Deploy to EKS
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          kubectl apply -f rideshare-k8s/applications/frontend/configmap.yaml
+          sed "s|daniel-rideshare-frontend:v[0-9]*|daniel-rideshare-frontend:$IMAGE_TAG|g" \
+            rideshare-k8s/applications/frontend/deployment.yaml \
+            | kubectl apply -f -
+          kubectl apply -f rideshare-k8s/applications/frontend/hpa.yaml
+          kubectl rollout status deployment/frontend-service \
+            -n rideshare-data --timeout=10m
+
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== Pods ===" && kubectl get pods -n rideshare-data -l app=frontend-service
+          echo "=== Describe ===" && kubectl describe pods -n rideshare-data -l app=frontend-service
+          echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=frontend-service --tail=50 || true
+
+  # ── Job 3: Driver Service ─────────────────────────────────────────
   # Skipped automatically unless rideshare-driver-service/** changed.
   # On workflow_dispatch (manual run), all services build regardless.
   build-driver-service:
     name: Driver Service
-    needs: detect-changes
-    if: needs.detect-changes.outputs.driver == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [detect-changes, build-frontend]
+    if: always() && (needs.detect-changes.outputs.driver == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     steps:
@@ -135,13 +201,20 @@ jobs:
             | kubectl apply -f -
           kubectl apply -f rideshare-k8s/applications/driver-service/hpa.yaml
           kubectl rollout status deployment/driver-service \
-            -n rideshare-data --timeout=5m
+            -n rideshare-data --timeout=10m
 
-  # ── Job 3: Rider Service ──────────────────────────────────────────
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== Pods ===" && kubectl get pods -n rideshare-data -l app=driver-service
+          echo "=== Describe ===" && kubectl describe pods -n rideshare-data -l app=driver-service
+          echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=driver-service --tail=50 || true
+
+  # ── Job 4: Rider Service ──────────────────────────────────────────
   build-rider-service:
     name: Rider Service
-    needs: detect-changes
-    if: needs.detect-changes.outputs.rider == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [detect-changes, build-frontend]
+    if: always() && (needs.detect-changes.outputs.rider == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     steps:
@@ -186,13 +259,20 @@ jobs:
             | kubectl apply -f -
           kubectl apply -f rideshare-k8s/applications/rider-service/hpa.yaml
           kubectl rollout status deployment/rider-service \
-            -n rideshare-data --timeout=5m
+            -n rideshare-data --timeout=10m
 
-  # ── Job 4: Trip Service ───────────────────────────────────────────
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== Pods ===" && kubectl get pods -n rideshare-data -l app=rider-service
+          echo "=== Describe ===" && kubectl describe pods -n rideshare-data -l app=rider-service
+          echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=rider-service --tail=50 || true
+
+  # ── Job 5: Trip Service ───────────────────────────────────────────
   build-trip-service:
     name: Trip Service
-    needs: detect-changes
-    if: needs.detect-changes.outputs.trip == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [detect-changes, build-frontend]
+    if: always() && (needs.detect-changes.outputs.trip == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     steps:
@@ -237,13 +317,20 @@ jobs:
             | kubectl apply -f -
           kubectl apply -f rideshare-k8s/applications/trip-service/hpa.yaml
           kubectl rollout status deployment/trip-service \
-            -n rideshare-data --timeout=5m
+            -n rideshare-data --timeout=10m
 
-  # ── Job 5: Email Service ──────────────────────────────────────────
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== Pods ===" && kubectl get pods -n rideshare-data -l app=trip-service
+          echo "=== Describe ===" && kubectl describe pods -n rideshare-data -l app=trip-service
+          echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=trip-service --tail=50 || true
+
+  # ── Job 6: Email Service ──────────────────────────────────────────
   build-email-service:
     name: Email Service
-    needs: detect-changes
-    if: needs.detect-changes.outputs.email == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [detect-changes, build-frontend]
+    if: always() && (needs.detect-changes.outputs.email == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     steps:
@@ -288,13 +375,20 @@ jobs:
             | kubectl apply -f -
           kubectl apply -f rideshare-k8s/applications/email-service/hpa.yaml
           kubectl rollout status deployment/email-service \
-            -n rideshare-data --timeout=5m
+            -n rideshare-data --timeout=10m
 
-  # ── Job 6: Matching Service (Go) ──────────────────────────────────
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== Pods ===" && kubectl get pods -n rideshare-data -l app=email-service
+          echo "=== Describe ===" && kubectl describe pods -n rideshare-data -l app=email-service
+          echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=email-service --tail=50 || true
+
+  # ── Job 7: Matching Service (Go) ──────────────────────────────────
   build-matching-service:
     name: Matching Service
-    needs: detect-changes
-    if: needs.detect-changes.outputs.matching == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [detect-changes, build-frontend]
+    if: always() && (needs.detect-changes.outputs.matching == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     steps:
@@ -339,68 +433,12 @@ jobs:
             | kubectl apply -f -
           kubectl apply -f rideshare-k8s/applications/matching-service/hpa.yaml
           kubectl rollout status deployment/matching-service \
-            -n rideshare-data --timeout=5m
+            -n rideshare-data --timeout=10m
 
-  # ── Job 7: Frontend (Next.js) ─────────────────────────────────────
-  # Next.js bakes NEXT_PUBLIC_* variables into the JavaScript bundle
-  # at BUILD TIME, not runtime. This means they must be passed as
-  # Docker build args. They are stored as GitHub Secrets and passed
-  # in via --build-arg below.
-  build-frontend:
-    name: Frontend
-    needs: detect-changes
-    if: needs.detect-changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Create ECR Repository
+      - name: Debug on failure
+        if: failure()
         run: |
-          aws ecr create-repository \
-            --repository-name daniel-rideshare-frontend \
-            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          echo "=== Pods ===" && kubectl get pods -n rideshare-data -l app=matching-service
+          echo "=== Describe ===" && kubectl describe pods -n rideshare-data -l app=matching-service
+          echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=matching-service --tail=50 || true
 
-      # The --build-arg values map to the ARG declarations in the Dockerfile.
-      # URL values match the ingress routes defined in platform/ingress/ingress.yaml.
-      # NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN comes from a GitHub Secret (never hardcoded).
-      - name: Build and Push Image
-        run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build \
-            --build-arg NEXT_PUBLIC_DRIVER_SERVICE_URL=https://daniel.teleioslabs.net/api/v1/drivers \
-            --build-arg NEXT_PUBLIC_RIDER_SERVICE_URL=https://daniel.teleioslabs.net/api/v1/riders \
-            --build-arg NEXT_PUBLIC_TRIP_SERVICE_URL=https://daniel.teleioslabs.net/api/v1/trips \
-            --build-arg NEXT_PUBLIC_TRIP_WS_URL=wss://daniel.teleioslabs.net/ws \
-            --build-arg NEXT_PUBLIC_WS_URL=wss://daniel.teleioslabs.net/ws \
-            --build-arg NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${{ secrets.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN }} \
-            -t ${{ env.ECR_REGISTRY }}/daniel-rideshare-frontend:$IMAGE_TAG \
-            ./rideshare-frontend
-          docker push ${{ env.ECR_REGISTRY }}/daniel-rideshare-frontend:$IMAGE_TAG
-
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig \
-            --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
-
-      - name: Deploy to EKS
-        run: |
-          IMAGE_TAG=${{ github.sha }}
-          kubectl apply -f rideshare-k8s/applications/frontend/configmap.yaml
-          sed "s|daniel-rideshare-frontend:v[0-9]*|daniel-rideshare-frontend:$IMAGE_TAG|g" \
-            rideshare-k8s/applications/frontend/deployment.yaml \
-            | kubectl apply -f -
-          kubectl apply -f rideshare-k8s/applications/frontend/hpa.yaml
-          kubectl rollout status deployment/frontend-service \
-            -n rideshare-data --timeout=5m

@@ -121,7 +121,7 @@ resource "helm_release" "ingress_nginx" {
 
 # ── 2. Cert-Manager ───────────────────────────────────────────────
 # Automatically provisions and renews TLS certificates from
-# Let's Encrypt for daniel.teleioslabs.net.
+# Let's Encrypt for daniel.daniel-resume.xyz.
 resource "helm_release" "cert_manager" {
   name             = "cert-manager"
   repository       = "https://charts.jetstack.io"
@@ -168,7 +168,7 @@ resource "helm_release" "external_secrets" {
 
 # ── 4. ExternalDNS ────────────────────────────────────────────────
 # Watches Ingress resources and automatically upserts a DNS record
-# in Route 53 for daniel.teleioslabs.net pointing to the NLB.
+# in Route 53 for daniel.daniel-resume.xyz pointing to the NLB.
 resource "helm_release" "external_dns" {
   name             = "external-dns"
   repository       = "https://kubernetes-sigs.github.io/external-dns"
@@ -185,7 +185,7 @@ resource "helm_release" "external_dns" {
 
   set {
     name  = "domainFilters[0]"
-    value = "teleioslabs.net"
+    value = "daniel-resume.xyz"
   }
 
   set {

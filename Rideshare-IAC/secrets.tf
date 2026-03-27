@@ -37,9 +37,10 @@ resource "random_password" "jwt_secret" {
 # Contains the full RDS connection URL, Redis URL, and all passwords
 # that the postgres StatefulSet and redis StatefulSet also need.
 resource "aws_secretsmanager_secret" "database_url" {
-  name        = "${var.student_name}-database-url"
-  description = "RDS and Redis connection strings for all rideshare services"
-  tags        = var.tags
+  name                    = "${var.student_name}-database-url"
+  description             = "RDS and Redis connection strings for all rideshare services"
+  recovery_window_in_days = 0
+  tags                    = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "database_url" {
@@ -64,9 +65,10 @@ resource "aws_secretsmanager_secret_version" "database_url" {
 # ── 2. daniel-jwt-secret-driver-and-rider ─────────────────────────
 # Read by: driver-service and rider-service for signing/verifying JWTs
 resource "aws_secretsmanager_secret" "jwt_secret" {
-  name        = "${var.student_name}-jwt-secret-driver-and-rider"
-  description = "JWT signing secret for driver and rider authentication"
-  tags        = var.tags
+  name                    = "${var.student_name}-jwt-secret-driver-and-rider"
+  description             = "JWT signing secret for driver and rider authentication"
+  recovery_window_in_days = 0
+  tags                    = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "jwt_secret" {
@@ -82,9 +84,10 @@ resource "aws_secretsmanager_secret_version" "jwt_secret" {
 # Values come from Terraform Cloud sensitive variables — they are your
 # Azure Communication Services credentials and cannot be generated.
 resource "aws_secretsmanager_secret" "email_service" {
-  name        = "${var.student_name}-email-service"
-  description = "Azure Communication Services credentials for email-service"
-  tags        = var.tags
+  name                    = "${var.student_name}-email-service"
+  description             = "Azure Communication Services credentials for email-service"
+  recovery_window_in_days = 0
+  tags                    = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "email_service" {
@@ -100,9 +103,10 @@ resource "aws_secretsmanager_secret_version" "email_service" {
 # Read by: rider-service for Google OAuth sign-in
 # Values come from Terraform Cloud sensitive variables.
 resource "aws_secretsmanager_secret" "google_oauth" {
-  name        = "${var.student_name}-google-oauth"
-  description = "Google OAuth 2.0 client credentials"
-  tags        = var.tags
+  name                    = "${var.student_name}-google-oauth"
+  description             = "Google OAuth 2.0 client credentials"
+  recovery_window_in_days = 0
+  tags                    = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "google_oauth" {
@@ -118,9 +122,10 @@ resource "aws_secretsmanager_secret_version" "google_oauth" {
 # Read by: frontend pod at runtime (separate from the build-time token
 # baked into the Next.js bundle via NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN)
 resource "aws_secretsmanager_secret" "mapbox" {
-  name        = "${var.student_name}-mapbox"
-  description = "Mapbox access token for frontend maps"
-  tags        = var.tags
+  name                    = "${var.student_name}-mapbox"
+  description             = "Mapbox access token for frontend maps"
+  recovery_window_in_days = 0
+  tags                    = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "mapbox" {

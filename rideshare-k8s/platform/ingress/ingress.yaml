@@ -13,10 +13,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - daniel.teleioslabs.net
+        - daniel-resume.xyz
       secretName: rideshare-tls-secret
   rules:
-    - host: daniel.teleioslabs.net
+    - host: daniel-resume.xyz
       http:
         paths:
           # --- WEBSOCKETS ---

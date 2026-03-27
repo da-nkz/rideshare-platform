@@ -138,7 +138,7 @@ jobs:
 
       # ── Ingress ───────────────────────────────────────────────────
       # ExternalDNS (installed by Terraform) sees this Ingress and
-      # automatically creates the daniel.teleioslabs.net DNS record.
+      # automatically creates the daniel.daniel-resume.xyz DNS record.
       # The stale admission webhook from previous installs is deleted
       # first — without it the ingress apply would fail trying to call
       # a webhook service that no longer exists.
