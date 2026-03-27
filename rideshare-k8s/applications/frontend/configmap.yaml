@@ -4,10 +4,10 @@ metadata:
   name: frontend-service-config
   namespace: rideshare-data
 data:
-  NEXT_PUBLIC_DRIVER_API: "https://daniel-resume.xyz/api/driver"
-  NEXT_PUBLIC_RIDER_API: "https://daniel-resume.xyz/api/rider"
-  NEXT_PUBLIC_TRIP_API: "https://daniel-resume.xyz/api/trip"
-  NEXT_PUBLIC_MATCHING_API: "https://daniel-resume.xyz/api/matching"
-  NEXT_PUBLIC_WS_URL: "wss://daniel-resume.xyz/api/matching"
+  NEXT_PUBLIC_DRIVER_API: "https://daniel-resume.xyz"
+  NEXT_PUBLIC_RIDER_API: "https://daniel-resume.xyz"
+  NEXT_PUBLIC_TRIP_API: "https://daniel-resume.xyz"
+  NEXT_PUBLIC_MATCHING_API: "https://daniel-resume.xyz"
+  NEXT_PUBLIC_WS_URL: "wss://daniel-resume.xyz/ws"
   NODE_ENV: "production"
   PORT: "3000"
