@@ -27,12 +27,14 @@ export default function ActiveTripPage() {
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/drivers/active-trip`, {
+      const res = await fetch(`${API_BASE}/api/v1/drivers/active-trip?t=${Date.now()}`, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
         },
+        cache: 'no-store',
       });
 
       const body = await res.json();
