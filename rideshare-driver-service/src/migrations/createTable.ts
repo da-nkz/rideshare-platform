@@ -22,12 +22,8 @@ export const createDriverTables = async (): Promise<void> => {
 
     await client.query('SET search_path TO driver_service');
 
-    await client.query('DROP TABLE IF EXISTS earnings CASCADE');
-    await client.query('DROP TABLE IF EXISTS driver_locations CASCADE');
-    await client.query('DROP TABLE IF EXISTS drivers CASCADE');
-
     await client.query(`
-      CREATE TABLE drivers (
+      CREATE TABLE IF NOT EXISTS drivers (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         first_name VARCHAR(255) NOT NULL,
         last_name VARCHAR(255) NOT NULL,
@@ -56,7 +52,7 @@ export const createDriverTables = async (): Promise<void> => {
 
 
     await client.query(`
-      CREATE TABLE driver_locations (
+      CREATE TABLE IF NOT EXISTS driver_locations (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         driver_id UUID UNIQUE REFERENCES drivers(id) ON DELETE CASCADE,
         latitude DECIMAL(10, 8) NOT NULL,
@@ -69,7 +65,7 @@ export const createDriverTables = async (): Promise<void> => {
 
   
     await client.query(`
-      CREATE TABLE earnings (
+      CREATE TABLE IF NOT EXISTS earnings (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         driver_id UUID REFERENCES drivers(id) ON DELETE CASCADE,
         trip_id UUID UNIQUE NOT NULL,
@@ -81,10 +77,10 @@ export const createDriverTables = async (): Promise<void> => {
     `);
 
 
-    await client.query('CREATE INDEX idx_drivers_email ON drivers(email)');
-    await client.query('CREATE INDEX idx_drivers_phone ON drivers(phone)');
-    await client.query('CREATE INDEX idx_driver_locations_driver_id ON driver_locations(driver_id)');
-    await client.query('CREATE INDEX idx_driver_earnings_driver_id ON earnings(driver_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_drivers_email ON drivers(email)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_drivers_phone ON drivers(phone)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_driver_locations_driver_id ON driver_locations(driver_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_driver_earnings_driver_id ON earnings(driver_id)');
 
     await client.query('COMMIT');
     console.log('✅ Driver service tables created successfully with required constraints!');

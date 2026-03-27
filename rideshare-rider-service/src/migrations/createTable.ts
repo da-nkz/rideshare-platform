@@ -20,13 +20,7 @@ const createTables = async () => {
     // 2. Set search_path **after** schema is guaranteed to exist
     await client.query('SET search_path TO rider_service, public');
 
-    // 3. (Optional) Drop existing tables — comment out after first successful run
-    //    or make it conditional / prompted in development only
-    console.log('🗑️  Dropping existing tables (if any)...');
-    await client.query('DROP TABLE IF EXISTS ride_requests CASCADE');
-    await client.query('DROP TABLE IF EXISTS riders CASCADE');
-
-    // 4. Create riders table
+    // 3. Create riders table (IF NOT EXISTS — safe to run on every deploy)
     console.log('📋 Creating riders table...');
     await client.query(`
       CREATE TABLE IF NOT EXISTS riders (
