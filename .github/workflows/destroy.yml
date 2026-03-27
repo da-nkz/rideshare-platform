@@ -1,0 +1,78 @@
+name: Destroy Infrastructure
+
+# ── Manual trigger only ───────────────────────────────────────────
+# This workflow is never triggered automatically — it must be run
+# manually from the GitHub Actions tab. A confirmation input is
+# required to prevent accidental destruction.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to destroy (dev | staging)"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+      confirm:
+        description: "Type DESTROY to confirm"
+        required: true
+
+env:
+  AWS_REGION: eu-west-1
+
+jobs:
+  destroy:
+    name: Terraform Destroy (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Rideshare-IAC
+
+    # Safety gate — workflow exits immediately if confirmation is wrong
+    if: github.event.inputs.confirm == 'DESTROY'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9"
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      # ── Clean up Helm releases from state ─────────────────────────
+      # Helm uninstalls often time out (cert-manager CRDs have a keep
+      # policy). Removing them from state lets Terraform skip the
+      # Helm uninstall and go straight to deleting AWS resources.
+      - name: Remove Helm releases from Terraform state
+        run: |
+          terraform state rm helm_release.cert_manager    2>/dev/null || true
+          terraform state rm helm_release.ingress_nginx   2>/dev/null || true
+          terraform state rm helm_release.external_secrets 2>/dev/null || true
+          terraform state rm helm_release.external_dns    2>/dev/null || true
+
+      - name: Terraform Destroy
+        env:
+          TF_VAR_azure_email_connection_string: ${{ secrets.TF_VAR_AZURE_EMAIL_CONNECTION_STRING }}
+          TF_VAR_sender_email: ${{ secrets.TF_VAR_SENDER_EMAIL }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_mapbox_access_token: ${{ secrets.TF_VAR_MAPBOX_ACCESS_TOKEN }}
+          TF_VAR_rds_db_username: ${{ secrets.TF_VAR_RDS_DB_USERNAME }}
+          TF_VAR_rds_db_password: ${{ secrets.TF_VAR_RDS_DB_PASSWORD }}
+        run: terraform destroy -var-file=${{ github.event.inputs.environment }}.tfvars -auto-approve
+
+      - name: Confirm Destruction
+        run: echo "✅ ${{ github.event.inputs.environment }} infrastructure destroyed successfully."
