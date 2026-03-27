@@ -4,7 +4,7 @@ metadata:
   name: driver-service-config
   namespace: rideshare-data
 data:
-  REDIS_HOST: "redis-cluster"
+  REDIS_HOST: "teleios-daniel-dev-redis.tjh5n9.ng.0001.euw1.cache.amazonaws.com"
   REDIS_PORT: "6379"
   PORT: "3003"
   NODE_ENV: "production"
