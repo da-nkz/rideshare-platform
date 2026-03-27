@@ -16,25 +16,27 @@ logger = logging.getLogger(__name__)
 # Set to DEBUG to see all connection and routing logs
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Get Redis URL from Environment
-REDIS_URL = os.environ.get("REDIS_URL")
+# Prefer explicit REDIS_HOST/PORT env vars (set via K8s configmap, no password).
+# Fall back to parsing REDIS_URL only if host is not specified directly.
+REDIS_HOST = os.environ.get("REDIS_HOST")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+REDIS_PASSWORD = None
+REDIS_SSL = False
 
-if not REDIS_URL:
-    logger.error("FATAL: REDIS_URL environment variable is not set. Using local fallback.")
-    REDIS_URL = "redis://localhost:6379" 
-
-# Parse the URL for connection parameters
-try:
-    url = urlparse(REDIS_URL)
-    REDIS_HOST = url.hostname
-    REDIS_PORT = url.port if url.port else 6379
-    REDIS_PASSWORD = url.password
-    REDIS_SSL = url.scheme == 'rediss'
-         
-    logger.info("Connecting to Redis at: %s:%s (SSL: %s)", REDIS_HOST, REDIS_PORT, REDIS_SSL)
-
-except Exception as e:
-    logger.error("FATAL: Failed to parse REDIS_URL. Error: %s", e)
+if REDIS_HOST:
+    logger.info("Connecting to Redis at: %s:%s (via REDIS_HOST env)", REDIS_HOST, REDIS_PORT)
+else:
+    REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+    try:
+        url = urlparse(REDIS_URL)
+        REDIS_HOST = url.hostname or "localhost"
+        REDIS_PORT = url.port or 6379
+        REDIS_PASSWORD = url.password  # None if no password in URL
+        REDIS_SSL = url.scheme == 'rediss'
+        logger.info("Connecting to Redis at: %s:%s (via REDIS_URL, SSL: %s)", REDIS_HOST, REDIS_PORT, REDIS_SSL)
+    except Exception as e:
+        logger.error("FATAL: Failed to parse REDIS_URL. Error: %s", e)
+        REDIS_HOST = "localhost"
 
 # --- Flask & Redis Setup ---
 app = Flask(__name__)
