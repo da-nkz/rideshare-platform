@@ -17,7 +17,7 @@ export default function ActiveTripPage() {
 
   const API_BASE = process.env.NEXT_PUBLIC_DRIVER_SERVICE_URL || "http://localhost:3003";
 
-  const fetchActiveTrip = useCallback(async () => {
+  const fetchActiveTrip = useCallback(async (retries = 6, retryDelay = 3000) => {
     if (!token || !user?.id) {
       router.replace('/driver/dashboard');
       return;
@@ -42,10 +42,19 @@ export default function ActiveTripPage() {
           console.log('Driver service response:', body.data);
           setTrip(body.data);
         } else {
+          // Trip may not be created yet (async event processing). Retry before redirecting.
+          if (retries > 0) {
+            await new Promise(r => setTimeout(r, retryDelay));
+            return fetchActiveTrip(retries - 1, retryDelay);
+          }
           setError('No active trip found.');
           router.push('/driver/dashboard');
         }
       } else {
+        if (retries > 0) {
+          await new Promise(r => setTimeout(r, retryDelay));
+          return fetchActiveTrip(retries - 1, retryDelay);
+        }
         console.error('Driver service error:', body);
         setError('Could not load active trip.');
         router.push('/driver/dashboard');

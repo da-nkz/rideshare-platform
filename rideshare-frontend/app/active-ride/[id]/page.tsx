@@ -18,7 +18,7 @@ export default function ActiveRidePage() {
 
   const API_BASE = process.env.NEXT_PUBLIC_TRIP_SERVICE_URL || "http://localhost:3005";
 
-  const fetchActiveRide = useCallback(async (isSilent = false) => {
+  const fetchActiveRide = useCallback(async (isSilent = false, retries = 6, retryDelay = 3000) => {
     if (!token || !user?.id) {
       router.replace('/dashboard');
       return;
@@ -32,6 +32,11 @@ export default function ActiveRidePage() {
         cache: 'no-store',
       });
       if (res.status === 404) {
+        // Trip may not be created yet (async event processing). Retry before giving up.
+        if (retries > 0) {
+          await new Promise(r => setTimeout(r, retryDelay));
+          return fetchActiveRide(isSilent, retries - 1, retryDelay);
+        }
         setError("You don't have an active ride right now.");
         setRideData(null);
         return;
