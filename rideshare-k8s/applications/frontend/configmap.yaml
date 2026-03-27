@@ -8,6 +8,6 @@ data:
   NEXT_PUBLIC_RIDER_API: "https://daniel-resume.xyz"
   NEXT_PUBLIC_TRIP_API: "https://daniel-resume.xyz"
   NEXT_PUBLIC_MATCHING_API: "https://daniel-resume.xyz"
-  NEXT_PUBLIC_WS_URL: "wss://daniel-resume.xyz/ws"
+  NEXT_PUBLIC_WS_URL: "wss://daniel-resume.xyz"
   NODE_ENV: "production"
   PORT: "3000"

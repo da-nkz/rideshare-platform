@@ -12,7 +12,19 @@
       "Bash(grep -r \"health\\\\|/ping\\\\|/status\\\\|/ready\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-matching-service' --include=*.go)",
       "Bash(grep -rn \"health\\\\|/ping\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-rider-service' --include=*.ts --include=*.js)",
       "Bash(head -5 grep -rn \"health\\\\|/ping\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-trip-service' --include=*.ts --include=*.js --include=*.py)",
-      "Bash(grep -rn \"health\\\\|/ping\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-frontend' --include=*.ts --include=*.tsx --include=*.js)"
+      "Bash(grep -rn \"health\\\\|/ping\" 'c:\\\\Users\\\\danie\\\\OneDrive\\\\Documents\\\\Teleios\\\\Terraform Project\\\\Rideshare-IAC/rideshare-frontend' --include=*.ts --include=*.tsx --include=*.js)",
+      "Bash(kubectl rollout:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl get:*)",
+      "Bash(python3 -c \"import sys,json,base64; d=json.load\\(sys.stdin\\); [print\\(k,''''='''',base64.b64decode\\(v\\).decode\\(\\)\\) for k,v in d.items\\(\\)]\")",
+      "Bash(python3 -c \"import sys,json,base64; d=json.load\\(sys.stdin\\); [print\\(k,''''='''',base64.b64decode\\(v\\).decode\\(\\)\\) for k,v in d.items\\(\\)]\" 2)",
+      "Bash(1 kubectl:*)",
+      "Bash(kubectl exec:*)",
+      "Bash(kubectl run:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''''scripts'''',{}\\), indent=2\\)\\)\")",
+      "Bash(kubectl delete:*)",
+      "Bash(kubectl apply:*)",
+      "Bash(sort find:*)"
     ]
   }
 }

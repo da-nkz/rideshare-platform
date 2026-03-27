@@ -44,7 +44,7 @@ export const createDriverTables = async (): Promise<void> => {
         total_trips INTEGER DEFAULT 0,
         is_available BOOLEAN DEFAULT false,
         is_verified BOOLEAN DEFAULT false,
-        is_active BOOLEAN DEFAULT true,
+        is_active BOOLEAN DEFAULT false,
         verification_token VARCHAR(255),
         reset_token VARCHAR(255),
         reset_token_expiry TIMESTAMP,

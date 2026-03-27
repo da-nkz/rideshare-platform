@@ -112,8 +112,8 @@ jobs:
             --build-arg NEXT_PUBLIC_DRIVER_SERVICE_URL=https://daniel-resume.xyz \
             --build-arg NEXT_PUBLIC_RIDER_SERVICE_URL=https://daniel-resume.xyz \
             --build-arg NEXT_PUBLIC_TRIP_SERVICE_URL=https://daniel-resume.xyz \
-            --build-arg NEXT_PUBLIC_TRIP_WS_URL=wss://daniel-resume.xyz/ws \
-            --build-arg NEXT_PUBLIC_WS_URL=wss://daniel-resume.xyz/ws \
+            --build-arg NEXT_PUBLIC_TRIP_WS_URL=wss://daniel-resume.xyz \
+            --build-arg NEXT_PUBLIC_WS_URL=wss://daniel-resume.xyz \
             --build-arg NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${{ secrets.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN }} \
             -t ${{ env.ECR_REGISTRY }}/daniel-rideshare-frontend:$IMAGE_TAG \
             ./rideshare-frontend
@@ -441,4 +441,83 @@ jobs:
           echo "=== Pods ===" && kubectl get pods -n rideshare-data -l app=matching-service
           echo "=== Describe ===" && kubectl describe pods -n rideshare-data -l app=matching-service
           echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=matching-service --tail=50 || true
+
+  # ── Job 8: Run Database Migrations ────────────────────────────────
+  # Runs after all services are deployed. Uses kubectl exec to run each
+  # service's migration script inside the already-running pod.
+  # Safe to run on every deploy — all migrations use IF NOT EXISTS.
+  run-migrations:
+    name: Run Database Migrations
+    needs:
+      - build-driver-service
+      - build-rider-service
+      - build-trip-service
+      - build-email-service
+      - build-matching-service
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
+
+      - name: Wait for deployments to be ready
+        run: |
+          echo "Waiting for services to stabilise..."
+          for svc in rider-service driver-service trip-service; do
+            kubectl rollout status deployment/$svc -n rideshare-data --timeout=5m || true
+          done
+
+      - name: Migrate rider-service (Node.js)
+        run: |
+          POD=$(kubectl get pod -n rideshare-data -l app=rider-service \
+            --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}')
+          echo "Running migration on pod: $POD"
+          kubectl exec $POD -n rideshare-data -- node /app/dist/migrations/createTable.js
+
+      - name: Migrate driver-service (Node.js)
+        run: |
+          POD=$(kubectl get pod -n rideshare-data -l app=driver-service \
+            --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}')
+          echo "Running migration on pod: $POD"
+          kubectl exec $POD -n rideshare-data -- node /app/dist/migrations/createTable.js
+
+      - name: Verify trip-service DB init (auto-migrates on startup)
+        run: |
+          POD=$(kubectl get pod -n rideshare-data -l app=trip-service \
+            --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}')
+          echo "Verifying trip-service DB on pod: $POD"
+          kubectl exec $POD -n rideshare-data -- python3 -c "
+          from utils.database import init_database
+          init_database()
+          print('Trip-service DB verified')
+          "
+
+      - name: Migration summary
+        if: always()
+        run: |
+          echo "=== Migration Results ==="
+          kubectl exec \
+            $(kubectl get pod -n rideshare-data -l app=rider-service --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}') \
+            -n rideshare-data -- \
+            node -e "
+              const { Pool } = require('pg');
+              const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+              pool.query(\"SELECT table_name FROM information_schema.tables WHERE table_schema IN ('rider_service','driver_service')\")
+                .then(r => { console.log('Tables:', r.rows.map(x=>x.table_name).join(', ')); pool.end(); })
+                .catch(e => { console.error(e.message); pool.end(); });
+            " || true
 
