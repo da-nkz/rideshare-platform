@@ -52,16 +52,43 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
-      # ── Clean up Helm releases from state ─────────────────────────
-      # Helm uninstalls often time out (cert-manager CRDs have a keep
-      # policy). Removing them from state lets Terraform skip the
-      # Helm uninstall and go straight to deleting AWS resources.
+      # ── Configure kubectl ──────────────────────────────────────────
+      # Needed to manually delete cert-manager CRDs before destroy.
+      # Uses the cluster name from the tfvars environment.
+      - name: Configure kubeconfig
+        run: |
+          CLUSTER_NAME=$(grep 'eks_cluster' ../${{ github.event.inputs.environment }}.tfvars 2>/dev/null \
+            || echo "teleios-daniel-${{ github.event.inputs.environment }}-eks")
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name teleios-daniel-${{ github.event.inputs.environment }}-eks 2>/dev/null || true
+
+      # ── Delete cert-manager CRDs ───────────────────────────────────
+      # cert-manager CRDs have helm.sh/resource-policy: keep so Helm
+      # refuses to delete them, causing a context deadline exceeded
+      # timeout during destroy. Deleting them manually first unblocks
+      # the Helm uninstall step in Terraform.
+      - name: Delete cert-manager CRDs
+        run: |
+          kubectl delete crd \
+            challenges.acme.cert-manager.io \
+            orders.acme.cert-manager.io \
+            certificaterequests.cert-manager.io \
+            certificates.cert-manager.io \
+            clusterissuers.cert-manager.io \
+            issuers.cert-manager.io \
+            2>/dev/null || true
+
+      # ── Remove Helm releases from Terraform state ──────────────────
+      # Belt-and-suspenders: if CRD deletion wasn't enough, removing
+      # these from state ensures Terraform skips Helm uninstalls
+      # entirely and proceeds straight to deleting AWS resources.
       - name: Remove Helm releases from Terraform state
         run: |
-          terraform state rm helm_release.cert_manager    2>/dev/null || true
-          terraform state rm helm_release.ingress_nginx   2>/dev/null || true
+          terraform state rm helm_release.cert_manager     2>/dev/null || true
+          terraform state rm helm_release.ingress_nginx    2>/dev/null || true
           terraform state rm helm_release.external_secrets 2>/dev/null || true
-          terraform state rm helm_release.external_dns    2>/dev/null || true
+          terraform state rm helm_release.external_dns     2>/dev/null || true
 
       - name: Terraform Destroy
         env:
