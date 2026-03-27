@@ -146,8 +146,8 @@ func broadcastRideToNearbyDrivers(req models.RideRequest) {
 
 func proposeRideToDriver(req models.RideRequest, driverID string) {
     driver, exists := pool.Pool.Get(driverID)
-    if !exists || driver.Conn == nil {
-        log.Printf("Driver %s not connected or missing WebSocket", driverID)
+    if !exists {
+        log.Printf("Driver %s not in pool — cannot propose ride", driverID)
         return
     }
 
@@ -155,6 +155,7 @@ func proposeRideToDriver(req models.RideRequest, driverID string) {
 
     proposal := map[string]any{
         "event":        "ride.proposed",
+        "driver_id":    driverID,
         "distance_km":  round2(distanceToPickup),
         "duration_min": estimateDurationMinutes(distanceToPickup),
         "data": map[string]any{
@@ -171,17 +172,31 @@ func proposeRideToDriver(req models.RideRequest, driverID string) {
         },
     }
 
-    if err := driver.Conn.WriteJSON(proposal); err != nil {
-        log.Printf("Failed to send proposal to driver %s: %v", driverID, err)
-        pool.Pool.Remove(driverID)
+    // Primary: send directly via matching-service WebSocket connection
+    if driver.Conn != nil {
+        if err := driver.Conn.WriteJSON(proposal); err != nil {
+            log.Printf("Failed to send proposal to driver %s via WebSocket: %v", driverID, err)
+            pool.Pool.Remove(driverID)
+        } else {
+            log.Printf("PROPOSAL SENT (WebSocket) → %s | %.2f km away | %s → %s | ₦%.0f",
+                driverID, distanceToPickup, req.PickupAddress, req.DropoffAddress, req.EstimatedFare)
+        }
+        return
+    }
+
+    // Fallback: driver connected via trip-service WebSocket gateway — publish to Redis
+    // The gateway subscribes to driver:* and relays to the driver's socket
+    data, err := json.Marshal(proposal)
+    if err != nil {
+        log.Printf("Failed to marshal ride proposal for driver %s: %v", driverID, err)
+        return
+    }
+    channel := "driver:" + driverID
+    if pubErr := redis.Client.Publish(ctx, channel, data).Err(); pubErr != nil {
+        log.Printf("Failed to publish ride proposal to Redis channel %s: %v", channel, pubErr)
     } else {
-        log.Printf("PROPOSAL SENT → %s | %.2f km away | %s → %s | ₦%.0f",
-            driverID,
-            distanceToPickup,
-            req.PickupAddress,
-            req.DropoffAddress,
-            req.EstimatedFare,
-        )
+        log.Printf("PROPOSAL SENT (Redis→gateway) → %s | %.2f km away | %s → %s | ₦%.0f",
+            driverID, distanceToPickup, req.PickupAddress, req.DropoffAddress, req.EstimatedFare)
     }
 }
 

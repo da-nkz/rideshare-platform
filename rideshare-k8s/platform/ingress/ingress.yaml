@@ -20,14 +20,16 @@ spec:
       http:
         paths:
           # --- WEBSOCKETS ---
-          # WebSocket gateway runs in trip-service on port 3006 (websocket_gateway.py)
+          # Matching-service handles WebSocket connections for both drivers (ride proposals)
+          # and riders (ride status updates). Drivers MUST connect here to be added to the
+          # in-memory driver pool so they can receive ride proposals.
           - path: /ws(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
-                name: trip-service
+                name: matching-service
                 port:
-                  number: 3006
+                  number: 3004
 
           # --- BACKEND APIS (Correctly Pluralized!) ---
           - path: /api/v1/drivers(/|$)(.*)

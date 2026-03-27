@@ -9,7 +9,7 @@ import (
 
     "rideshare-matching-service/pool"
     "rideshare-matching-service/redis"
-    
+    "rideshare-matching-service/types"
 )
 
 var ctx = context.Background()
@@ -64,7 +64,8 @@ func processDriverLocationUpdate(payload string) {
         lng, lngErr := strconv.ParseFloat(event1.Data.Location.Longitude, 64)
 
         if latErr == nil && lngErr == nil {
-            updateDriverInPool(event1.Data.DriverID, lat, lng, event1.Data.IsAvailable)
+            updateOrAddDriverInPool(event1.Data.DriverID, lat, lng, event1.Data.IsAvailable,
+                event1.Data.DriverInfo.VehicleType, "", "", event1.Data.DriverInfo.Rating)
             success = true
         }
     }
@@ -90,7 +91,7 @@ func processDriverLocationUpdate(payload string) {
                 return
             }
 
-            // Extract location
+            // Extract location — try nested object first, then top-level lat/lng
             var loc map[string]interface{}
             if data, ok := generic["data"].(map[string]interface{}); ok && data["location"] != nil {
                 loc = data["location"].(map[string]interface{})
@@ -101,17 +102,42 @@ func processDriverLocationUpdate(payload string) {
             if loc != nil {
                 lat = extractFloat(loc, "latitude")
                 lng = extractFloat(loc, "longitude")
+                // also try lat/lng keys inside the location object
+                if lat == 0 {
+                    lat = extractFloat(loc, "lat")
+                }
+                if lng == 0 {
+                    lng = extractFloat(loc, "lng")
+                }
             }
 
-            // Extract is_available
+            // Fallback: top-level lat/lng fields (format from driver-service availability PATCH)
+            if lat == 0 && lng == 0 {
+                lat = extractFloat(generic, "lat")
+                lng = extractFloat(generic, "lng")
+            }
+
+            // Extract is_available — try nested data first, then top-level
             if data, ok := generic["data"].(map[string]interface{}); ok {
                 if avail, ok := data["is_available"].(bool); ok {
                     isAvailable = avail
                 }
+            } else if avail, ok := generic["is_available"].(bool); ok {
+                isAvailable = avail
+            }
+
+            // Also extract vehicle info for pool auto-registration
+            var vehicleType, name, licensePlate string
+            var rating float64
+            vehicleType = extractString(generic, "vehicle_type")
+            name = extractString(generic, "name")
+            licensePlate = extractString(generic, "license_plate")
+            if r, ok := generic["rating"].(float64); ok {
+                rating = r
             }
 
             if lat != 0 && lng != 0 {
-                updateDriverInPool(driverID, lat, lng, isAvailable)
+                updateOrAddDriverInPool(driverID, lat, lng, isAvailable, vehicleType, name, licensePlate, rating)
                 success = true
             }
         }
@@ -143,8 +169,10 @@ func extractFloat(m map[string]interface{}, key string) float64 {
     return 0
 }
 
-// This uses the REAL methods that exist in your pool: UpdateLocation + SetAvailability
-func updateDriverInPool(driverID string, lat, lng float64, isAvailable bool) {
+// updateOrAddDriverInPool updates the driver's location in the pool.
+// If the driver is not yet in the pool (e.g., location update arrived before WebSocket
+// connected), it auto-registers them using info from the Redis payload.
+func updateOrAddDriverInPool(driverID string, lat, lng float64, isAvailable bool, vehicleType, name, licensePlate string, rating float64) {
     if driverID == "" {
         log.Println("Rejecting driver update with empty DriverID")
         return
@@ -152,9 +180,44 @@ func updateDriverInPool(driverID string, lat, lng float64, isAvailable bool) {
 
     log.Printf("SERVICE: Updating driver %s → Location: (%.6f, %.6f) | Available: %t", driverID, lat, lng, isAvailable)
 
-    // Update location (this method EXISTS in your pool)
-    pool.Pool.UpdateLocation(driverID, lat, lng)
+    _, exists := pool.Pool.Get(driverID)
+    if !exists {
+        // Driver not yet in pool — auto-register from Redis payload (no Conn available)
+        firstName := name
+        lastName := ""
+        if idx := len(name); idx > 0 {
+            for i, ch := range name {
+                if ch == ' ' && i > 0 {
+                    firstName = name[:i]
+                    lastName = name[i+1:]
+                    break
+                }
+            }
+        }
+        if vehicleType == "" {
+            vehicleType = "SEDAN"
+        }
+        if rating == 0 {
+            rating = 5.0
+        }
 
-    // Update availability (this method also EXISTS)
+        newDriver := &types.Driver{
+            ID:           driverID,
+            FirstName:    firstName,
+            LastName:     lastName,
+            LicensePlate: licensePlate,
+            VehicleType:  vehicleType,
+            Rating:       rating,
+            Lat:          lat,
+            Lng:          lng,
+            IsAvailable:  isAvailable,
+            Conn:         nil, // No direct WebSocket — proposals will be sent via Redis
+        }
+        pool.Pool.Add(newDriver)
+        log.Printf("SERVICE: Auto-registered driver %s in pool from Redis event", driverID)
+        return
+    }
+
+    pool.Pool.UpdateLocation(driverID, lat, lng)
     pool.Pool.SetAvailability(driverID, isAvailable)
 }
