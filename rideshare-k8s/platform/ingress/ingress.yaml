@@ -20,13 +20,14 @@ spec:
       http:
         paths:
           # --- WEBSOCKETS ---
+          # WebSocket gateway runs in trip-service on port 3006 (websocket_gateway.py)
           - path: /ws(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
-                name: matching-service
+                name: trip-service
                 port:
-                  number: 3004
+                  number: 3006
 
           # --- BACKEND APIS (Correctly Pluralized!) ---
           - path: /api/v1/drivers(/|$)(.*)

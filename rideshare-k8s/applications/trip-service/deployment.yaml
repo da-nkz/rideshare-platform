@@ -23,7 +23,8 @@ spec:
         - name: trip-service
           image: 221693237976.dkr.ecr.eu-west-1.amazonaws.com/daniel-trip-service:v2
           ports:
-            - containerPort: 3005 
+            - containerPort: 3005   # Flask API
+            - containerPort: 3006   # WebSocket gateway
           
           # configuration variables
           envFrom:
@@ -76,6 +77,11 @@ spec:
   selector:
     app: trip-service
   ports:
-    - protocol: TCP
+    - name: api
+      protocol: TCP
       port: 3005
       targetPort: 3005
+    - name: websocket
+      protocol: TCP
+      port: 3006
+      targetPort: 3006
