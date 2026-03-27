@@ -12,7 +12,10 @@ import swaggerDocument from './swagger.json';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001; 
+const PORT = process.env.PORT || 3001;
+
+// Trust nginx ingress proxy so X-Forwarded-For is used for real client IPs
+app.set('trust proxy', 1);
 
 app.use(helmet());
 app.use(cors());

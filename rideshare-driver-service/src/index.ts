@@ -14,6 +14,9 @@ import { connectDB } from './config/database';
 const app = express();
 const PORT = process.env.PORT || 3005;
 
+// Trust nginx ingress proxy so X-Forwarded-For is used for real client IPs
+app.set('trust proxy', 1);
+
 
 app.use(cors({
   origin: (origin, callback) => {
