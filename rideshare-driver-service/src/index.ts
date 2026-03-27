@@ -79,6 +79,7 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
   message: 'Too many requests from this IP',
+  skip: (req) => req.path === '/api/v1/health' || req.path === '/api/v1/ready',
 });
 app.use('/', limiter);
 
