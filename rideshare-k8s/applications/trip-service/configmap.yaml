@@ -8,3 +8,5 @@ data:
   REDIS_TLS: "false"
   DEBUG: "False"
   ALLOWED_ORIGINS: "https://daniel-resume.xyz"
+  REDIS_HOST: "teleios-daniel-dev-redis.tjh5n9.ng.0001.euw1.cache.amazonaws.com"
+  REDIS_PORT: "6379"
