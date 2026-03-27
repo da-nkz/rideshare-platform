@@ -54,6 +54,24 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
+      # ── Pre-apply: force-delete any secrets pending deletion ──────
+      # If a previous destroy left secrets in a 30-day recovery window,
+      # Terraform cannot recreate them. This step permanently deletes
+      # any such secrets so apply can proceed cleanly.
+      - name: Force-delete pending secrets
+        run: |
+          for SECRET in \
+            daniel-database-url \
+            daniel-jwt-secret-driver-and-rider \
+            daniel-email-service \
+            daniel-google-oauth \
+            daniel-mapbox; do
+            aws secretsmanager delete-secret \
+              --secret-id "$SECRET" \
+              --force-delete-without-recovery \
+              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          done
+
       # Plan first so you can see what will change in the logs
       - name: Terraform Plan
         env:
