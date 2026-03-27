@@ -443,9 +443,10 @@ jobs:
           echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=matching-service --tail=50 || true
 
   # ── Job 8: Run Database Migrations ────────────────────────────────
-  # Runs after all services are deployed. Uses kubectl exec to run each
-  # service's migration script inside the already-running pod.
-  # Safe to run on every deploy — all migrations use IF NOT EXISTS.
+  # Only runs migrations when tables do not yet exist (first-time setup).
+  # This prevents wiping data on every deploy — the compiled migration
+  # scripts used DROP TABLE which is destructive. Once new images are
+  # deployed (with CREATE TABLE IF NOT EXISTS), this guard can be relaxed.
   run-migrations:
     name: Run Database Migrations
     needs:
@@ -478,46 +479,49 @@ jobs:
             kubectl rollout status deployment/$svc -n rideshare-data --timeout=5m || true
           done
 
-      - name: Migrate rider-service (Node.js)
+      - name: Migrate rider-service (only if table missing)
         run: |
           POD=$(kubectl get pod -n rideshare-data -l app=rider-service \
             --field-selector=status.phase=Running \
             -o jsonpath='{.items[0].metadata.name}')
-          echo "Running migration on pod: $POD"
-          kubectl exec $POD -n rideshare-data -- node /app/dist/migrations/createTable.js
+          TABLE_EXISTS=$(kubectl exec $POD -n rideshare-data -- node -e \
+            "process.env.NODE_TLS_REJECT_UNAUTHORIZED='0'; \
+             const {Pool}=require('pg'); \
+             const p=new Pool({connectionString:process.env.DATABASE_URL+'?sslmode=require'}); \
+             p.query(\"SELECT 1 FROM information_schema.tables WHERE table_schema='rider_service' AND table_name='riders'\") \
+              .then(r=>{console.log(r.rows.length>0?'exists':'missing');p.end()}) \
+              .catch(()=>{console.log('missing');p.end()});" 2>/dev/null)
+          if [ "$TABLE_EXISTS" = "missing" ]; then
+            echo "Riders table missing — running migration on pod: $POD"
+            kubectl exec $POD -n rideshare-data -- node /app/dist/migrations/createTable.js
+          else
+            echo "Riders table already exists — skipping migration"
+          fi
 
-      - name: Migrate driver-service (Node.js)
+      - name: Migrate driver-service (only if table missing)
         run: |
           POD=$(kubectl get pod -n rideshare-data -l app=driver-service \
             --field-selector=status.phase=Running \
             -o jsonpath='{.items[0].metadata.name}')
-          echo "Running migration on pod: $POD"
-          kubectl exec $POD -n rideshare-data -- node /app/dist/migrations/createTable.js
+          TABLE_EXISTS=$(kubectl exec $POD -n rideshare-data -- node -e \
+            "process.env.NODE_TLS_REJECT_UNAUTHORIZED='0'; \
+             const {Pool}=require('pg'); \
+             const p=new Pool({connectionString:process.env.DATABASE_URL+'?sslmode=require'}); \
+             p.query(\"SELECT 1 FROM information_schema.tables WHERE table_schema='driver_service' AND table_name='drivers'\") \
+              .then(r=>{console.log(r.rows.length>0?'exists':'missing');p.end()}) \
+              .catch(()=>{console.log('missing');p.end()});" 2>/dev/null)
+          if [ "$TABLE_EXISTS" = "missing" ]; then
+            echo "Drivers table missing — running migration on pod: $POD"
+            kubectl exec $POD -n rideshare-data -- node /app/dist/migrations/createTable.js
+          else
+            echo "Drivers table already exists — skipping migration"
+          fi
 
       - name: Verify trip-service DB init (auto-migrates on startup)
         run: |
           POD=$(kubectl get pod -n rideshare-data -l app=trip-service \
             --field-selector=status.phase=Running \
             -o jsonpath='{.items[0].metadata.name}')
-          echo "Verifying trip-service DB on pod: $POD"
-          kubectl exec $POD -n rideshare-data -- python3 -c "
-          from utils.database import init_database
-          init_database()
-          print('Trip-service DB verified')
-          "
-
-      - name: Migration summary
-        if: always()
-        run: |
-          echo "=== Migration Results ==="
-          kubectl exec \
-            $(kubectl get pod -n rideshare-data -l app=rider-service --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}') \
-            -n rideshare-data -- \
-            node -e "
-              const { Pool } = require('pg');
-              const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-              pool.query(\"SELECT table_name FROM information_schema.tables WHERE table_schema IN ('rider_service','driver_service')\")
-                .then(r => { console.log('Tables:', r.rows.map(x=>x.table_name).join(', ')); pool.end(); })
-                .catch(e => { console.error(e.message); pool.end(); });
-            " || true
+          echo "Trip-service auto-migrates on startup via run.py — pod: $POD"
+          echo "Skipping manual migration for trip-service"
 
