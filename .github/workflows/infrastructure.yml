@@ -1,9 +1,8 @@
 name: Infrastructure
 
 # ── When does this run? ───────────────────────────────────────────
-# 1. Automatically when you push changes to the Terraform code or
-#    the platform-level Kubernetes manifests.
-# 2. Manually from the GitHub Actions tab (workflow_dispatch).
+# 1. Manually from the GitHub Actions tab — choose dev, staging, or prod.
+# 2. Automatically on push to main for Terraform/platform changes — defaults to dev.
 on:
   push:
     branches: [main]
@@ -12,17 +11,29 @@ on:
       - 'rideshare-k8s/platform/**'
       - 'rideshare-k8s/aws/**'
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to provision"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: dev
 
 env:
   AWS_REGION: eu-west-1
-  CLUSTER_NAME: teleios-daniel-dev-eks
+  # Falls back to 'dev' when triggered by a push (no input available)
+  ENV_NAME: ${{ inputs.environment || 'dev' }}
 
 jobs:
   # ── Job 1: Terraform ──────────────────────────────────────────────
-  # Provisions the AWS infrastructure: VPC, EKS, RDS, Redis, S3, EC2.
-  # Also creates all AWS Secrets Manager entries (secrets.tf).
+  # Provisions AWS infrastructure via Terraform Cloud (Remote execution).
+  # TF Cloud runs the plan/apply using workspace variables for secrets.
+  # GitHub runner only handles pre-apply cleanup and kubectl steps.
   terraform:
-    name: Provision Infrastructure
+    name: Provision Infrastructure (${{ inputs.environment || 'dev' }})
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,6 +43,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Needed for the force-delete secrets pre-apply step (AWS CLI)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -39,23 +51,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # cli_config_credentials_token authenticates Terraform CLI to
-      # Terraform Cloud. State is stored there; plan/apply run here
-      # on the GitHub runner (Local execution mode).
+      # TF_WORKSPACE tells Terraform CLI which tagged workspace to use.
+      # TF Cloud then runs plan/apply remotely using that workspace's variables.
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9"
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
-      # With the cloud {} block in main.tf, init connects directly to
-      # the teleios-daniel-dev workspace in Terraform Cloud.
-      # No -backend-config flags or workspace selection needed.
       - name: Terraform Init
+        env:
+          TF_WORKSPACE: teleios-daniel-${{ env.ENV_NAME }}
         run: terraform init
 
       # ── Pre-apply: force-delete any secrets pending deletion ──────
-      # If a previous destroy left secrets in a 30-day recovery window,
+      # If a previous destroy left secrets in a recovery window,
       # Terraform cannot recreate them. This step permanently deletes
       # any such secrets so apply can proceed cleanly.
       - name: Force-delete pending secrets
@@ -72,39 +82,23 @@ jobs:
               --region ${{ env.AWS_REGION }} 2>/dev/null || true
           done
 
-      # Plan first so you can see what will change in the logs
+      # TF Cloud runs the plan remotely using workspace variables.
+      # No TF_VAR_* env vars needed here — they live in TF Cloud workspaces.
       - name: Terraform Plan
         env:
-          TF_VAR_azure_email_connection_string: ${{ secrets.TF_VAR_AZURE_EMAIL_CONNECTION_STRING }}
-          TF_VAR_sender_email: ${{ secrets.TF_VAR_SENDER_EMAIL }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
-          TF_VAR_mapbox_access_token: ${{ secrets.TF_VAR_MAPBOX_ACCESS_TOKEN }}
-          TF_VAR_rds_db_username: ${{ secrets.TF_VAR_RDS_DB_USERNAME }}
-          TF_VAR_rds_db_password: ${{ secrets.TF_VAR_RDS_DB_PASSWORD }}
-        run: terraform plan -var-file=dev.tfvars -out=tfplan
+          TF_WORKSPACE: teleios-daniel-${{ env.ENV_NAME }}
+        run: terraform plan -var-file=${{ env.ENV_NAME }}.tfvars -out=tfplan
 
       - name: Terraform Apply
         env:
-          TF_VAR_azure_email_connection_string: ${{ secrets.TF_VAR_AZURE_EMAIL_CONNECTION_STRING }}
-          TF_VAR_sender_email: ${{ secrets.TF_VAR_SENDER_EMAIL }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
-          TF_VAR_mapbox_access_token: ${{ secrets.TF_VAR_MAPBOX_ACCESS_TOKEN }}
-          TF_VAR_rds_db_username: ${{ secrets.TF_VAR_RDS_DB_USERNAME }}
-          TF_VAR_rds_db_password: ${{ secrets.TF_VAR_RDS_DB_PASSWORD }}
+          TF_WORKSPACE: teleios-daniel-${{ env.ENV_NAME }}
         run: terraform apply -auto-approve tfplan
 
   # ── Job 2: Platform Setup ─────────────────────────────────────────
-  # Runs after Terraform. NGINX, Cert-Manager, ESO, ExternalDNS and
-  # their IRSA roles are now managed as helm_release resources in
-  # platform.tf — Terraform installs them during apply.
-  #
-  # This job only applies the Kubernetes manifests that depend on those
-  # helm releases being ready (CRDs must exist before ExternalSecrets
-  # resources can be applied).
+  # Runs after Terraform. Applies Kubernetes manifests that depend on
+  # Helm CRDs installed by Terraform (ExternalSecrets, ClusterIssuer, Ingress).
   platform-setup:
-    name: Apply Platform Manifests
+    name: Apply Platform Manifests (${{ inputs.environment || 'dev' }})
     runs-on: ubuntu-latest
     needs: terraform
 
@@ -123,7 +117,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+            --name teleios-daniel-${{ env.ENV_NAME }}-eks
 
       # ── App Namespace ─────────────────────────────────────────────
       - name: Create App Namespace
@@ -135,19 +129,12 @@ jobs:
         run: kubectl apply -f rideshare-k8s/aws/storage-classes.yaml
 
       # ── Secrets ───────────────────────────────────────────────────
-      # ClusterSecretStore defines WHERE secrets come from (AWS SM).
-      # ExternalSecrets defines WHICH secrets to fetch into the cluster.
-      # ESO CRDs are installed by Terraform (helm_release.external_secrets)
-      # so they are guaranteed to exist before this step runs.
       - name: Apply Secret Store and External Secrets
         run: |
           kubectl apply -f rideshare-k8s/platform/secrets/secret-store.yaml
           kubectl apply -f rideshare-k8s/platform/secrets/external-secrets.yaml
 
       # ── TLS ───────────────────────────────────────────────────────
-      # Wait for cert-manager webhook before applying ClusterIssuer —
-      # otherwise CRD validation fails. Cert-Manager is installed by
-      # Terraform so it is already running when this step executes.
       - name: Apply Cluster Issuer
         run: |
           kubectl rollout status deployment/cert-manager-webhook \
@@ -155,11 +142,6 @@ jobs:
           kubectl apply -f rideshare-k8s/platform/ingress/cluster-issuer.yaml
 
       # ── Ingress ───────────────────────────────────────────────────
-      # ExternalDNS (installed by Terraform) sees this Ingress and
-      # automatically creates the daniel.daniel-resume.xyz DNS record.
-      # The stale admission webhook from previous installs is deleted
-      # first — without it the ingress apply would fail trying to call
-      # a webhook service that no longer exists.
       - name: Apply Ingress Rules
         run: |
           kubectl delete validatingwebhookconfiguration ingress-nginx-admission 2>/dev/null || true

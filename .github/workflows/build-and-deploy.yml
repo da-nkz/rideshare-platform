@@ -1,7 +1,7 @@
 name: Build and Deploy Services
 
 # ── When does this run? ───────────────────────────────────────────
-# 1. After Platform Setup completes — forms the final link in the
+# 1. After Infrastructure completes — forms the final link in the
 #    push-to-deploy chain: Terraform → Platform Setup → Apps
 # 2. Automatically when you push changes to any microservice directory
 #    or its corresponding Kubernetes manifests. Only the changed
@@ -23,21 +23,28 @@ on:
       - 'rideshare-frontend/**'
       - 'rideshare-k8s/applications/**'
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: dev
 
 env:
   AWS_REGION: eu-west-1
   ECR_REGISTRY: 221693237976.dkr.ecr.eu-west-1.amazonaws.com
-  CLUSTER_NAME: teleios-daniel-dev-eks
+  # Falls back to 'dev' when triggered by push or workflow_run (no input available)
+  ENV_NAME: ${{ inputs.environment || 'dev' }}
 
 jobs:
   # ── Job 1: Detect Changes ─────────────────────────────────────────
-  # Compares what files changed in this push and outputs a true/false
-  # flag per service. The downstream build jobs read these flags and
-  # skip themselves if their service didn't change.
   detect-changes:
     name: Detect Changed Services
     runs-on: ubuntu-latest
-    # When triggered by workflow_run, only proceed if platform-setup succeeded
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'push' ||
@@ -78,8 +85,6 @@ jobs:
               - 'rideshare-k8s/applications/frontend/**'
 
   # ── Job 2: Frontend (Next.js) ─────────────────────────────────────
-  # Built first — its URLs are baked into the JS bundle at build time
-  # so it must complete before backend services are deployed.
   build-frontend:
     name: Frontend
     needs: detect-changes
@@ -123,7 +128,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+            --name teleios-daniel-${{ env.ENV_NAME }}-eks
 
       - name: Deploy to EKS
         run: |
@@ -144,8 +149,6 @@ jobs:
           echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=frontend-service --tail=50 || true
 
   # ── Job 3: Driver Service ─────────────────────────────────────────
-  # Skipped automatically unless rideshare-driver-service/** changed.
-  # On workflow_dispatch (manual run), all services build regardless.
   build-driver-service:
     name: Driver Service
     needs: [detect-changes, build-frontend]
@@ -162,19 +165,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Generates a temporary ECR login token valid for 12 hours
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 2>/dev/null || true makes this idempotent — no error if repo exists
       - name: Create ECR Repository
         run: |
           aws ecr create-repository \
             --repository-name daniel-driver-service \
             --region ${{ env.AWS_REGION }} 2>/dev/null || true
 
-      # Image is tagged with the full git commit SHA for traceability.
-      # You can always roll back to any previous commit's image.
       - name: Build and Push Image
         run: |
           IMAGE_TAG=${{ github.sha }}
@@ -187,11 +186,8 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+            --name teleios-daniel-${{ env.ENV_NAME }}-eks
 
-      # sed replaces the hardcoded :v1 tag in deployment.yaml with the
-      # actual git SHA tag before applying — keeps the manifest in sync
-      # with what's actually deployed without editing the file on disk.
       - name: Deploy to EKS
         run: |
           IMAGE_TAG=${{ github.sha }}
@@ -248,7 +244,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+            --name teleios-daniel-${{ env.ENV_NAME }}-eks
 
       - name: Deploy to EKS
         run: |
@@ -306,7 +302,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+            --name teleios-daniel-${{ env.ENV_NAME }}-eks
 
       - name: Deploy to EKS
         run: |
@@ -364,7 +360,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+            --name teleios-daniel-${{ env.ENV_NAME }}-eks
 
       - name: Deploy to EKS
         run: |
@@ -422,7 +418,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+            --name teleios-daniel-${{ env.ENV_NAME }}-eks
 
       - name: Deploy to EKS
         run: |
@@ -443,10 +439,6 @@ jobs:
           echo "=== Logs ===" && kubectl logs -n rideshare-data -l app=matching-service --tail=50 || true
 
   # ── Job 8: Run Database Migrations ────────────────────────────────
-  # Only runs migrations when tables do not yet exist (first-time setup).
-  # This prevents wiping data on every deploy — the compiled migration
-  # scripts used DROP TABLE which is destructive. Once new images are
-  # deployed (with CREATE TABLE IF NOT EXISTS), this guard can be relaxed.
   run-migrations:
     name: Run Database Migrations
     needs:
@@ -470,7 +462,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+            --name teleios-daniel-${{ env.ENV_NAME }}-eks
 
       - name: Wait for deployments to be ready
         run: |
@@ -524,4 +516,3 @@ jobs:
             -o jsonpath='{.items[0].metadata.name}')
           echo "Trip-service auto-migrates on startup via run.py — pod: $POD"
           echo "Skipping manual migration for trip-service"
-

@@ -8,12 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Environment to destroy (dev | staging)"
+        description: "Environment to destroy"
         required: true
         type: choice
         options:
           - dev
           - staging
+          - prod
       confirm:
         description: "Type DESTROY to confirm"
         required: true
@@ -50,15 +51,14 @@ jobs:
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
       - name: Terraform Init
+        env:
+          TF_WORKSPACE: teleios-daniel-${{ github.event.inputs.environment }}
         run: terraform init
 
       # ── Configure kubectl ──────────────────────────────────────────
       # Needed to manually delete cert-manager CRDs before destroy.
-      # Uses the cluster name from the tfvars environment.
       - name: Configure kubeconfig
         run: |
-          CLUSTER_NAME=$(grep 'eks_cluster' ../${{ github.event.inputs.environment }}.tfvars 2>/dev/null \
-            || echo "teleios-daniel-${{ github.event.inputs.environment }}-eks")
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
             --name teleios-daniel-${{ github.event.inputs.environment }}-eks 2>/dev/null || true
@@ -84,21 +84,19 @@ jobs:
       # these from state ensures Terraform skips Helm uninstalls
       # entirely and proceeds straight to deleting AWS resources.
       - name: Remove Helm releases from Terraform state
+        env:
+          TF_WORKSPACE: teleios-daniel-${{ github.event.inputs.environment }}
         run: |
           terraform state rm helm_release.cert_manager     2>/dev/null || true
           terraform state rm helm_release.ingress_nginx    2>/dev/null || true
           terraform state rm helm_release.external_secrets 2>/dev/null || true
           terraform state rm helm_release.external_dns     2>/dev/null || true
 
+      # TF Cloud runs the destroy remotely using workspace variables.
+      # No TF_VAR_* env vars needed here — they live in TF Cloud workspaces.
       - name: Terraform Destroy
         env:
-          TF_VAR_azure_email_connection_string: ${{ secrets.TF_VAR_AZURE_EMAIL_CONNECTION_STRING }}
-          TF_VAR_sender_email: ${{ secrets.TF_VAR_SENDER_EMAIL }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
-          TF_VAR_mapbox_access_token: ${{ secrets.TF_VAR_MAPBOX_ACCESS_TOKEN }}
-          TF_VAR_rds_db_username: ${{ secrets.TF_VAR_RDS_DB_USERNAME }}
-          TF_VAR_rds_db_password: ${{ secrets.TF_VAR_RDS_DB_PASSWORD }}
+          TF_WORKSPACE: teleios-daniel-${{ github.event.inputs.environment }}
         run: terraform destroy -var-file=${{ github.event.inputs.environment }}.tfvars -auto-approve
 
       - name: Confirm Destruction

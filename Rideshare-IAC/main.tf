@@ -8,7 +8,7 @@ terraform {
   cloud {
     organization = "Teleios"
     workspaces {
-      name = "teleios-daniel-staging"
+      tags = ["rideshare"]
     }
   }
 
