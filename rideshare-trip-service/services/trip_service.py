@@ -405,7 +405,11 @@ class TripService:
                                rider_rating, driver_info, created_at, updated_at,
                                started_at, completed_at
                         FROM trip_service.trips
-                        WHERE rider_id = %s AND status IN ('accepted', 'arrived', 'started')
+                        WHERE rider_id = %s
+                          AND (
+                            status IN ('accepted', 'arrived', 'started')
+                            OR (status = 'completed' AND completed_at > NOW() - INTERVAL '10 minutes')
+                          )
                         ORDER BY created_at DESC LIMIT 1
                         """, (rider_id,)
                     )
