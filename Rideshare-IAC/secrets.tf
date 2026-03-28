@@ -52,6 +52,7 @@ resource "aws_secretsmanager_secret_version" "database_url" {
     DATABASE_URL        = "postgresql://${var.rds_db_username}:${var.rds_db_password}@${module.rds.db_endpoint}/${var.rds_db_name}"
     DATABASE_READ_URL   = "postgresql://${var.rds_db_username}:${var.rds_db_password}@${module.rds.db_endpoint}/${var.rds_db_name}"
     REDIS_URL           = "redis://:${random_password.redis.result}@${module.redis.redis_endpoint}:6379"
+    REDIS_HOST          = module.redis.redis_endpoint
     REDIS_PASSWORD      = random_password.redis.result
     POSTGRES_ADMIN_USER = var.rds_db_username
     POSTGRES_ADMIN_PASS = var.rds_db_password

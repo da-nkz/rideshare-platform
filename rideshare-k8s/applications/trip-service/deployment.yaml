@@ -38,6 +38,12 @@ spec:
                 secretKeyRef:
                   name: rideshare-db-credentials
                   key: DATABASE_URL
+
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: rideshare-db-credentials
+                  key: REDIS_HOST
                   
           readinessProbe:
             httpGet:
