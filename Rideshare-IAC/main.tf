@@ -8,7 +8,7 @@ terraform {
   cloud {
     organization = "Teleios"
     workspaces {
-      name = "teleios-daniel-dev"
+      name = "teleios-daniel-staging"
     }
   }
 

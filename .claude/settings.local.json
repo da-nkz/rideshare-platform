@@ -24,7 +24,10 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''''scripts'''',{}\\), indent=2\\)\\)\")",
       "Bash(kubectl delete:*)",
       "Bash(kubectl apply:*)",
-      "Bash(sort find:*)"
+      "Bash(sort find:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(gh run:*)"
     ]
   }
 }
