@@ -95,25 +95,25 @@ export default function ActiveTripPage() {
 
   return (
     <ActiveRide
-      rideRequestId={tripData.ride_request_id || ''}
+      rideRequestId={tripData.ride_request_id || tripData.rideRequestId || ''}
       status={tripData.status as any}
       riderInfo={{
-        name: tripData.rider?.name || 'Rider',
-        phone: tripData.rider?.phone || 'No phone provided',
-        rating: tripData.rider?.rating || 5.0,
+        name: tripData.rider_name || tripData.rider?.name || 'Rider',
+        phone: tripData.rider_phone || tripData.rider?.phone || 'No phone provided',
+        rating: tripData.rider_rating || tripData.rider?.rating || 5.0,
         id: '',
       }}
       pickupLocation={{
-        lat: 6.5244, 
-        lng: 3.3792,
-        address: tripData.pickup_address || '',
+        lat: Number(tripData.pickup_lat ?? tripData.pickupLat ?? 0),
+        lng: Number(tripData.pickup_lng ?? tripData.pickupLng ?? 0),
+        address: tripData.pickup_address || tripData.pickupAddress || '',
       }}
       dropoffLocation={{
-        lat: 6.5244, 
-        lng: 3.3792,
-        address: tripData.dropoff_address || '',
+        lat: Number(tripData.dropoff_lat ?? tripData.dropoffLat ?? 0),
+        lng: Number(tripData.dropoff_lng ?? tripData.dropoffLng ?? 0),
+        address: tripData.dropoff_address || tripData.dropoffAddress || '',
       }}
-      fareEstimate={tripData.estimated_fare || 0}
+      fareEstimate={tripData.estimated_fare || tripData.estimatedFare || 0}
       userId={user?.id || ''}
       liveDriverLocation={null}
     />
